@@ -16,7 +16,7 @@ class AuthProvider extends ChangeNotifier {
   // ======================
   Future<void> login(String username, String password) async {
     final response = await http.post(
-      Uri.parse('http://localhost:3000/api/auth/login'),
+      Uri.parse('https://ams-backend-o4va.onrender.com/api/auth/login'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({'username': username, 'password': password}),
     );
@@ -59,7 +59,7 @@ class AuthProvider extends ChangeNotifier {
     }
 
     final response = await http.post(
-      Uri.parse('http://localhost:3000/api/auth/register'),
+      Uri.parse('https://ams-backend-o4va.onrender.com/api/auth/register'),
       headers: {'Content-Type': 'application/json'},
       body: json.encode(body),
     );

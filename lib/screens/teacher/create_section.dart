@@ -1,3 +1,4 @@
+import 'package:attsys/config/api_config.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
@@ -98,7 +99,7 @@ class _CreateSectionScreenState extends State<CreateSectionScreen> {
       };
 
       final res = await http.post(
-        Uri.parse('http://localhost:3000/api/teacher/classes'),
+        Uri.parse('${ApiConfig.baseUrl}/api/teacher/classes'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',

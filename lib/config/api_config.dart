@@ -1,7 +1,7 @@
 // lib/config/api_config.dart
 class ApiConfig {
   // ✅ FIXED: Support multiple environments
-  static const String _devUrl = 'http://localhost:3000'; // Android emulator
+  static const String _devUrl = 'https://ams-backend-o4va.onrender.com';
   static const String _prodUrl = 'https://your-production-url.com';
 
   // Change this based on your environment

@@ -119,6 +119,10 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        actions: [BackButton()],
+        backgroundColor: Colors.transparent,
+      ),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(

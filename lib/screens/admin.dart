@@ -53,14 +53,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
       } else {
         Fluttertoast.showToast(
           msg: 'Failed to load teachers (${res.statusCode})',
-          backgroundColor: Colors.red,
+          backgroundColor: Colors.redAccent,
+          textColor: Colors.white,
         );
         setState(() => loadingTeachers = false);
       }
     } catch (e) {
       Fluttertoast.showToast(
         msg: 'Network error: $e',
-        backgroundColor: Colors.red,
+        backgroundColor: Colors.redAccent,
+        textColor: Colors.white,
       );
       setState(() => loadingTeachers = false);
     }
@@ -72,12 +74,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
       teacherClasses = [];
       selectedTeacherId = teacherId;
 
-      // ✅ FIXED: Use the 'name' field from backend
       final teacher = teachers.firstWhere(
         (t) => t['id'].toString() == teacherId,
+        orElse: () => {},
       );
       selectedTeacherName =
-          teacher['name'] ?? '${teacher['firstname']} ${teacher['surname']}';
+          teacher['name'] ??
+          '${teacher['firstname'] ?? ''} ${teacher['surname'] ?? ''}'.trim();
     });
 
     try {
@@ -96,20 +99,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
         });
       } else {
         Fluttertoast.showToast(
-          msg: 'Failed to load classes for this teacher',
-          backgroundColor: Colors.red,
+          msg: 'Failed to load classes',
+          backgroundColor: Colors.redAccent,
         );
         setState(() => loadingClasses = false);
       }
     } catch (e) {
-      Fluttertoast.showToast(msg: 'Error: $e', backgroundColor: Colors.red);
+      Fluttertoast.showToast(
+        msg: 'Error: $e',
+        backgroundColor: Colors.redAccent,
+      );
       setState(() => loadingClasses = false);
     }
   }
 
   Future<void> _createClassForTeacher() async {
     if (selectedTeacherId == null) {
-      Fluttertoast.showToast(msg: 'Select a teacher first');
+      Fluttertoast.showToast(
+        msg: 'Select a teacher first',
+        backgroundColor: Colors.redAccent,
+      );
       return;
     }
 
@@ -122,44 +131,63 @@ class _AdminDashboardState extends State<AdminDashboard> {
       context: context,
       builder:
           (context) => AlertDialog(
-            title: Text('Add New Class for $selectedTeacherName'),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+            ),
+            title: Text(
+              'Add New Class for $selectedTeacherName',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextField(
                     controller: nameController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Class Name *',
-                      border: OutlineInputBorder(),
-                      hintText: 'e.g., Mathematics',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey.shade50,
                     ),
                   ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: gradeController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Grade Level *',
-                      border: OutlineInputBorder(),
-                      hintText: 'e.g., 10',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey.shade50,
                     ),
                     keyboardType: TextInputType.number,
                   ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: sectionController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Section (optional)',
-                      border: OutlineInputBorder(),
-                      hintText: 'e.g., A',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey.shade50,
                     ),
                   ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: schoolYearController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'School Year *',
-                      border: OutlineInputBorder(),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey.shade50,
                     ),
                   ),
                 ],
@@ -177,8 +205,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
                   if (name.isEmpty || grade.isEmpty) {
                     Fluttertoast.showToast(
-                      msg: 'Class name and grade level required',
-                      backgroundColor: Colors.red,
+                      msg: 'Class name and grade required',
+                      backgroundColor: Colors.redAccent,
                     );
                     return;
                   }
@@ -205,7 +233,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
                     if (res.statusCode == 201) {
                       Fluttertoast.showToast(
-                        msg: 'Class created successfully',
+                        msg: 'Class created',
                         backgroundColor: Colors.green,
                       );
                       Navigator.pop(context);
@@ -214,16 +242,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       final msg = json.decode(res.body)['message'] ?? 'Failed';
                       Fluttertoast.showToast(
                         msg: msg,
-                        backgroundColor: Colors.red,
+                        backgroundColor: Colors.redAccent,
                       );
                     }
                   } catch (e) {
                     Fluttertoast.showToast(
                       msg: 'Error: $e',
-                      backgroundColor: Colors.red,
+                      backgroundColor: Colors.redAccent,
                     );
                   }
                 },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF667eea),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
                 child: const Text('Create'),
               ),
             ],
@@ -236,9 +271,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
       context: context,
       builder:
           (context) => AlertDialog(
-            title: const Text('Delete Class'),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+            ),
+            title: const Text('Confirm Delete'),
             content: const Text(
-              'Are you sure? This will delete the class and all related attendance records. This cannot be undone.',
+              'Delete this class and all related attendance records? This cannot be undone.',
             ),
             actions: [
               TextButton(
@@ -247,7 +285,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
-                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
                 child: const Text('Delete'),
               ),
             ],
@@ -267,316 +305,433 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       if (res.statusCode == 200 || res.statusCode == 204) {
         Fluttertoast.showToast(
-          msg: 'Class deleted successfully',
+          msg: 'Class deleted',
           backgroundColor: Colors.green,
         );
         _loadTeacherClasses(selectedTeacherId!);
       } else {
         Fluttertoast.showToast(
-          msg: 'Failed to delete class',
-          backgroundColor: Colors.red,
+          msg: 'Failed to delete',
+          backgroundColor: Colors.redAccent,
         );
       }
     } catch (e) {
-      Fluttertoast.showToast(msg: 'Error: $e', backgroundColor: Colors.red);
+      Fluttertoast.showToast(
+        msg: 'Error: $e',
+        backgroundColor: Colors.redAccent,
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Admin Dashboard'),
-        elevation: 2,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-            onPressed: () {
-              _loadAllTeachers();
-              if (selectedTeacherId != null) {
-                _loadTeacherClasses(selectedTeacherId!);
-              }
-            },
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF667eea), Color(0xFF764ba2)],
           ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.redAccent),
-            tooltip: 'Logout',
-            onPressed: () {
-              Provider.of<AuthProvider>(context, listen: false).logout();
-            },
-          ),
-        ],
-      ),
-      body: Row(
-        children: [
-          // Left: Teachers List
-          Expanded(
-            flex: 2,
-            child: Container(
-              decoration: BoxDecoration(
-                border: Border(right: BorderSide(color: Colors.grey.shade300)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    color: Colors.blue.shade50,
-                    child: Row(
-                      children: [
-                        const Icon(Icons.school, color: Colors.blue),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Teachers',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          '${teachers.length}',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Colors.blue.shade700,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
+        ),
+        child: SafeArea(
+          child: Row(
+            children: [
+              // Teachers sidebar
+              Expanded(
+                flex: 2,
+                child: Container(
+                  margin: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.95),
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.12),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
                   ),
-                  Expanded(
-                    child:
-                        loadingTeachers
-                            ? const Center(child: CircularProgressIndicator())
-                            : teachers.isEmpty
-                            ? const Center(child: Text('No teachers found'))
-                            : ListView.builder(
-                              itemCount: teachers.length,
-                              itemBuilder: (context, index) {
-                                final teacher = teachers[index];
-                                final isSelected =
-                                    selectedTeacherId ==
-                                    teacher['id'].toString();
-
-                                return Card(
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.school_rounded,
+                              color: Color(0xFF667eea),
+                              size: 32,
+                            ),
+                            const SizedBox(width: 12),
+                            const Text(
+                              'Teachers',
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                            ),
+                            const Spacer(),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF667eea).withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                '${teachers.length}',
+                                style: const TextStyle(
+                                  color: Color(0xFF667eea),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child:
+                            loadingTeachers
+                                ? const Center(
+                                  child: CircularProgressIndicator(
+                                    color: Color(0xFF667eea),
                                   ),
-                                  elevation: isSelected ? 4 : 1,
-                                  color:
-                                      isSelected ? Colors.blue.shade50 : null,
-                                  child: ListTile(
-                                    leading: CircleAvatar(
-                                      backgroundColor:
-                                          isSelected
-                                              ? Colors.blue
-                                              : Colors.grey.shade300,
-                                      child: Icon(
-                                        Icons.person,
-                                        color:
-                                            isSelected
-                                                ? Colors.white
-                                                : Colors.grey.shade700,
-                                      ),
+                                )
+                                : teachers.isEmpty
+                                ? const Center(
+                                  child: Text(
+                                    'No teachers found',
+                                    style: TextStyle(
+                                      color: Colors.grey,
+                                      fontSize: 16,
                                     ),
-                                    title: Text(
-                                      teacher['name'] ?? 'Unknown',
-                                      style: TextStyle(
-                                        fontWeight:
-                                            isSelected
-                                                ? FontWeight.bold
-                                                : FontWeight.normal,
+                                  ),
+                                )
+                                : ListView.builder(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                  ),
+                                  itemCount: teachers.length,
+                                  itemBuilder: (context, index) {
+                                    final teacher = teachers[index];
+                                    final isSelected =
+                                        selectedTeacherId ==
+                                        teacher['id'].toString();
+                                    final name =
+                                        teacher['name'] ??
+                                        '${teacher['firstname'] ?? ''} ${teacher['surname'] ?? ''}'
+                                            .trim();
+
+                                    return Padding(
+                                      padding: const EdgeInsets.only(bottom: 8),
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color:
+                                              isSelected
+                                                  ? const Color(
+                                                    0xFF667eea,
+                                                  ).withOpacity(0.1)
+                                                  : null,
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                        ),
+                                        child: ListTile(
+                                          leading: CircleAvatar(
+                                            backgroundColor:
+                                                isSelected
+                                                    ? const Color(0xFF667eea)
+                                                    : Colors.grey.shade300,
+                                            child: Icon(
+                                              Icons.person_rounded,
+                                              color:
+                                                  isSelected
+                                                      ? Colors.white
+                                                      : Colors.grey.shade700,
+                                            ),
+                                          ),
+                                          title: Text(
+                                            name.isEmpty ? 'Unknown' : name,
+                                            style: TextStyle(
+                                              fontWeight:
+                                                  isSelected
+                                                      ? FontWeight.bold
+                                                      : FontWeight.normal,
+                                              color: Colors.black87,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            '${teacher['classes_count'] ?? 0} classes • ID: ${teacher['id']}',
+                                            style: TextStyle(
+                                              color:
+                                                  isSelected
+                                                      ? const Color(0xFF667eea)
+                                                      : Colors.grey.shade700,
+                                            ),
+                                          ),
+                                          onTap:
+                                              () => _loadTeacherClasses(
+                                                teacher['id'].toString(),
+                                              ),
+                                        ),
                                       ),
-                                    ),
-                                    subtitle: Column(
+                                    );
+                                  },
+                                ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Classes panel
+              Expanded(
+                flex: 3,
+                child: Container(
+                  margin: const EdgeInsets.fromLTRB(0, 16, 16, 16),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.95),
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.12),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child:
+                      selectedTeacherId == null
+                          ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.arrow_back_rounded,
+                                  size: 80,
+                                  color: Colors.grey.shade300,
+                                ),
+                                const SizedBox(height: 24),
+                                const Text(
+                                  'Select a teacher\nto view their classes',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    color: Colors.grey,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                          : Column(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(20),
+                                child: Row(
+                                  children: [
+                                    Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        Text('ID: ${teacher['id']}'),
-                                        Text(
-                                          '${teacher['classes_count'] ?? 0} classes',
+                                        const Text(
+                                          'Classes',
                                           style: TextStyle(
-                                            color: Colors.blue.shade700,
-                                            fontSize: 12,
+                                            fontSize: 14,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                        Text(
+                                          selectedTeacherName ?? 'Teacher',
+                                          style: const TextStyle(
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.black87,
                                           ),
                                         ),
                                       ],
                                     ),
-                                    selected: isSelected,
-                                    onTap:
-                                        () => _loadTeacherClasses(
-                                          teacher['id'].toString(),
-                                        ),
-                                  ),
-                                );
-                              },
-                            ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Right: Selected Teacher's Classes
-          Expanded(
-            flex: 3,
-            child:
-                selectedTeacherId == null
-                    ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.arrow_back,
-                            size: 64,
-                            color: Colors.grey.shade300,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Select a teacher to view their classes',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                    : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          color: Colors.green.shade50,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'Classes',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.grey,
+                                    const Spacer(),
+                                    ElevatedButton.icon(
+                                      icon: const Icon(
+                                        Icons.add_rounded,
+                                        size: 20,
                                       ),
-                                    ),
-                                    Text(
-                                      selectedTeacherName ?? 'Teacher',
-                                      style: const TextStyle(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
+                                      label: const Text('New Class'),
+                                      onPressed: _createClassForTeacher,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(
+                                          0xFF4CAF50,
+                                        ),
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 20,
+                                          vertical: 12,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-                              ElevatedButton.icon(
-                                icon: const Icon(Icons.add, size: 20),
-                                label: const Text('New Class'),
-                                onPressed: _createClassForTeacher,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                  foregroundColor: Colors.white,
-                                ),
+                              Expanded(
+                                child:
+                                    loadingClasses
+                                        ? const Center(
+                                          child: CircularProgressIndicator(
+                                            color: Color(0xFF667eea),
+                                          ),
+                                        )
+                                        : teacherClasses.isEmpty
+                                        ? Center(
+                                          child: Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              const Icon(
+                                                Icons.class_outlined,
+                                                size: 64,
+                                                color: Colors.grey,
+                                              ),
+                                              const SizedBox(height: 16),
+                                              const Text(
+                                                'No classes assigned yet',
+                                                style: TextStyle(
+                                                  fontSize: 18,
+                                                  color: Colors.grey,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        )
+                                        : ListView.builder(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 20,
+                                            vertical: 8,
+                                          ),
+                                          itemCount: teacherClasses.length,
+                                          itemBuilder: (context, index) {
+                                            final cls = teacherClasses[index];
+                                            return Padding(
+                                              padding: const EdgeInsets.only(
+                                                bottom: 12,
+                                              ),
+                                              child: Container(
+                                                decoration: BoxDecoration(
+                                                  color: Colors.grey.shade50,
+                                                  borderRadius:
+                                                      BorderRadius.circular(16),
+                                                ),
+                                                child: ListTile(
+                                                  leading: Container(
+                                                    padding:
+                                                        const EdgeInsets.all(
+                                                          12,
+                                                        ),
+                                                    decoration: BoxDecoration(
+                                                      gradient:
+                                                          const LinearGradient(
+                                                            colors: [
+                                                              Color(0xFF667eea),
+                                                              Color(0xFF764ba2),
+                                                            ],
+                                                          ),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            12,
+                                                          ),
+                                                    ),
+                                                    child: const Icon(
+                                                      Icons.class_rounded,
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                  title: Text(
+                                                    cls['name'] ?? 'Unnamed',
+                                                    style: const TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color: Colors.black87,
+                                                    ),
+                                                  ),
+                                                  subtitle: Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Text(
+                                                        'Grade ${cls['grade_level']}${cls['section'] != null ? ' - ${cls['section']}' : ''}',
+                                                        style: TextStyle(
+                                                          color:
+                                                              Colors
+                                                                  .grey
+                                                                  .shade700,
+                                                        ),
+                                                      ),
+                                                      Text(
+                                                        'SY: ${cls['school_year']} • ${cls['student_count'] ?? 0} students',
+                                                        style: TextStyle(
+                                                          fontSize: 12,
+                                                          color:
+                                                              Colors
+                                                                  .grey
+                                                                  .shade600,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  trailing: Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      IconButton(
+                                                        icon: const Icon(
+                                                          Icons.edit_rounded,
+                                                          color: Colors.blue,
+                                                        ),
+                                                        onPressed: () {
+                                                          Fluttertoast.showToast(
+                                                            msg:
+                                                                'Edit feature coming soon',
+                                                          );
+                                                        },
+                                                      ),
+                                                      IconButton(
+                                                        icon: const Icon(
+                                                          Icons.delete_rounded,
+                                                          color:
+                                                              Colors.redAccent,
+                                                        ),
+                                                        onPressed:
+                                                            () => _deleteClass(
+                                                              cls['id']
+                                                                  .toString(),
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
                               ),
                             ],
                           ),
-                        ),
-                        Expanded(
-                          child:
-                              loadingClasses
-                                  ? const Center(
-                                    child: CircularProgressIndicator(),
-                                  )
-                                  : teacherClasses.isEmpty
-                                  ? const Center(
-                                    child: Text('No classes assigned yet'),
-                                  )
-                                  : ListView.builder(
-                                    padding: const EdgeInsets.all(8),
-                                    itemCount: teacherClasses.length,
-                                    itemBuilder: (context, index) {
-                                      final cls = teacherClasses[index];
-                                      return Card(
-                                        margin: const EdgeInsets.symmetric(
-                                          vertical: 4,
-                                        ),
-                                        child: ListTile(
-                                          leading: Container(
-                                            padding: const EdgeInsets.all(8),
-                                            decoration: BoxDecoration(
-                                              color: Colors.green.shade100,
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                            ),
-                                            child: Icon(
-                                              Icons.class_,
-                                              color: Colors.green.shade700,
-                                            ),
-                                          ),
-                                          title: Text(
-                                            cls['name'],
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                          subtitle: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Grade ${cls['grade_level']}${cls['section'] != null ? ' - Section ${cls['section']}' : ''}',
-                                              ),
-                                              Text(
-                                                'SY: ${cls['school_year']} • ${cls['student_count'] ?? 0} students',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: Colors.grey.shade600,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          trailing: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              IconButton(
-                                                icon: const Icon(
-                                                  Icons.edit,
-                                                  color: Colors.blue,
-                                                  size: 20,
-                                                ),
-                                                onPressed: () {
-                                                  Fluttertoast.showToast(
-                                                    msg: 'Edit coming soon',
-                                                  );
-                                                },
-                                              ),
-                                              IconButton(
-                                                icon: const Icon(
-                                                  Icons.delete,
-                                                  color: Colors.red,
-                                                  size: 20,
-                                                ),
-                                                onPressed:
-                                                    () => _deleteClass(
-                                                      cls['id'].toString(),
-                                                    ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                        ),
-                      ],
-                    ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
