@@ -37,7 +37,11 @@ class _QRScanScreenState extends State<QRScanScreen> {
     return prefs.getString('token');
   }
 
-  Future<void> _recordAttendance(String lrn) async {
+  Future<void> _recordAttendance(
+    String lrn,
+    String surname,
+    String firstname,
+  ) async {
     if (isProcessing) return;
     setState(() => isProcessing = true);
 
@@ -48,7 +52,7 @@ class _QRScanScreenState extends State<QRScanScreen> {
         return;
       }
 
-      final payload = 'lrn:$lrn|class:${widget.classId}';
+      final payload = '$surname,$firstname|lrn:$lrn|class:${widget.classId}';
 
       final response = await http
           .post(
@@ -107,33 +111,51 @@ class _QRScanScreenState extends State<QRScanScreen> {
   }
 
   void _processBarcode(String rawValue) {
+    // Expected format: surname,firstname|lrn:123456789012|class:1
     final parts = rawValue.split('|');
-    if (parts.length != 2) {
-      debugPrint('Invalid QR format: $rawValue');
+    if (parts.length != 3) {
+      debugPrint(
+        'Invalid QR format: $rawValue (expected 3 parts, got ${parts.length})',
+      );
       return;
     }
 
-    final lrnPart = parts[0];
-    final classPart = parts[1];
+    final namePart = parts[0];
+    final lrnPart = parts[1];
+    final classPart = parts[2];
 
+    // Validate format
     if (!lrnPart.startsWith('lrn:') || !classPart.startsWith('class:')) {
       debugPrint('Invalid QR prefixes: $rawValue');
       return;
     }
 
+    // Extract values
+    final names = namePart.split(',');
+    if (names.length != 2) {
+      debugPrint('Invalid name format: $namePart');
+      return;
+    }
+
+    final surname = names[0].trim();
+    final firstname = names[1].trim();
+
     final lrn = lrnPart.substring(4);
     final scannedClassId = classPart.substring(6);
 
+    // Validate LRN
     if (lrn.length != 12 || !RegExp(r'^\d{12}$').hasMatch(lrn)) {
       _showMessage('Invalid LRN format', isError: true);
       return;
     }
 
+    // Check if QR is for correct class
     if (scannedClassId != widget.classId) {
       _showMessage('QR code is for a different class', isError: true);
       return;
     }
 
+    // Check cooldown
     final now = DateTime.now();
     if (_lastScannedLRN.containsKey(lrn)) {
       final diff = now.difference(_lastScannedLRN[lrn]!).inSeconds;
@@ -144,7 +166,7 @@ class _QRScanScreenState extends State<QRScanScreen> {
     }
 
     _lastScannedLRN[lrn] = now;
-    _recordAttendance(lrn);
+    _recordAttendance(lrn, surname, firstname);
   }
 
   @override

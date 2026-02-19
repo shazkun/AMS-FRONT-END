@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:attsys/config/api_config.dart';
-import 'package:attsys/widgets/logout.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:qr_flutter/qr_flutter.dart';
@@ -87,9 +86,11 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
     // ✅ FIXED: Generate correct payload format
     final classId = widget.classId ?? "1"; // Use provided or default
     final lrn = profile!['lrn'];
+    final surname = profile!['surname'];
+    final firstname = profile!['firstname'];
 
     setState(() {
-      qrPayload = 'lrn:$lrn|class:$classId';
+      qrPayload = '$surname,$firstname |lrn:$lrn|class:$classId';
       debugPrint("QR generated: $qrPayload");
     });
   }
