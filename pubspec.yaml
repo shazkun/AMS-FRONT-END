@@ -37,7 +37,7 @@ dependencies:
   fluttertoast: ^8.2.4  # Toasts
   fl_chart: ^0.66.2  # Replacement for charts_flutter
   syncfusion_flutter_pdf: ^24.1.41  # PDF generation
-  excel: ^4.0.6  # Excel generation (though web might need alternatives)
+  excel: ^4.0.3  # Excel generation (though web might need alternatives)
   shared_preferences: ^2.2.2  # Local storage for token
   intl: ^0.19.0  # Date formatting
   cupertino_icons: ^1.0.2
@@ -46,6 +46,8 @@ dependencies:
   mobile_scanner: ^6.0.11
   table_calendar: ^3.0.9
   pdf: ^3.11.3
+  file_saver: ^0.3.1
+  web: ^1.1.1
 
 
 dev_dependencies:
