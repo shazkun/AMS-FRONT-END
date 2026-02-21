@@ -11,7 +11,7 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
-build_web.bat
+bweb.bat
 # IntelliJ related
 *.iml
 *.ipr

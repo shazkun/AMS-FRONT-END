@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:attsys/config/api_config.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -450,12 +452,13 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
 
       final fileName =
           'SF2_${widget.className}_${DateFormat('yyyy-MM').format(now)}.xlsx';
-
-      await downloadFile(
-        Uint8List.fromList(fileBytes),
-        fileName,
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      );
+      if (kIsWeb || Platform.isWindows) {
+        await downloadFile(
+          Uint8List.fromList(fileBytes),
+          fileName,
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        );
+      }
 
       if (mounted) {
         setState(() => isExporting = false);

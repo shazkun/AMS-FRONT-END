@@ -27,10 +27,14 @@ class _QRScanScreenState extends State<QRScanScreen> {
   /// Returns true if the current platform supports camera-based QR scanning.
   /// Web and Windows are NOT supported — show the info screen instead.
   bool get _isScanSupported {
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      return false;
+    if (kIsWeb) {
+      return true;
+    } else {
+      if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        return false;
+      }
+      return true; // Android, iOS
     }
-    return true; // Android, iOS
   }
 
   /// Maps to in the last accepted LRN → timestamp for client-side cooldown.
