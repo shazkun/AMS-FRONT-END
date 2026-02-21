@@ -2,12 +2,10 @@ import 'dart:convert';
 import 'package:attsys/widgets/logout.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import '../providers/auth_provider.dart';
 import '../config/api_config.dart';
 
 class StudentDashboard extends StatefulWidget {
