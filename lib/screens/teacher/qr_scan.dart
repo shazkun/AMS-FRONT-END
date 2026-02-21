@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
 
 class QRScanScreen extends StatefulWidget {
   final String classId;
@@ -20,24 +22,35 @@ class QRScanScreen extends StatefulWidget {
 }
 
 class _QRScanScreenState extends State<QRScanScreen> {
-  final MobileScannerController controller = MobileScannerController(
-    facing: CameraFacing.back,
-    torchEnabled: false,
-  );
+  MobileScannerController? controller;
 
-  /// Maps LRN → timestamp of the last time it was accepted for processing.
-  /// Prevents the same QR code from being re-processed within [_cooldownDuration].
+  /// Returns true if the current platform supports camera-based QR scanning.
+  /// Web and Windows are NOT supported — show the info screen instead.
+  bool get _isScanSupported {
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      return false;
+    }
+    return true; // Android, iOS
+  }
+
+  /// Maps to in the last accepted LRN → timestamp for client-side cooldown.
   final Map<String, DateTime> _lastAcceptedAt = {};
-
-  /// Client-side cooldown: ignore a QR that was already scanned within this window.
-  /// The server enforces its own 30 s window; this prevents flooding the API.
   static const Duration _cooldownDuration = Duration(seconds: 10);
 
-  /// True while an HTTP request is in flight.
   bool _isProcessing = false;
-
   String? _lastScannedStudent;
   int _successCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isScanSupported) {
+      controller = MobileScannerController(
+        facing: CameraFacing.back,
+        torchEnabled: false,
+      );
+    }
+  }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -46,18 +59,14 @@ class _QRScanScreenState extends State<QRScanScreen> {
     return prefs.getString('token');
   }
 
-  /// Returns true if [lrn] is still within its cooldown window.
   bool _isOnCooldown(String lrn) {
     final last = _lastAcceptedAt[lrn];
     if (last == null) return false;
     return DateTime.now().difference(last) < _cooldownDuration;
   }
 
-  /// Records [lrn] as "just scanned now".
   void _markScanned(String lrn) {
     _lastAcceptedAt[lrn] = DateTime.now();
-
-    // Prune stale entries to keep memory bounded
     _lastAcceptedAt.removeWhere(
       (_, ts) => DateTime.now().difference(ts) > _cooldownDuration * 3,
     );
@@ -89,69 +98,46 @@ class _QRScanScreenState extends State<QRScanScreen> {
     );
   }
 
-  // ── Core scan handler ────────────────────────────────────────────────────────
+  // ── Scan logic ───────────────────────────────────────────────────────────────
 
-  /// Called by [MobileScanner.onDetect]. Validates format, enforces client-side
-  /// cooldown, then calls [_recordAttendance].
   void _processBarcode(String rawValue) {
-    // Expected format: surname,firstname|lrn:123456789012|class:1
     final parts = rawValue.split('|');
-    if (parts.length != 3) {
-      debugPrint(
-        'Invalid QR format ($rawValue): expected 3 pipe-separated parts',
-      );
-      return;
-    }
+    if (parts.length != 3) return;
 
     final namePart = parts[0];
     final lrnPart = parts[1];
     final classPart = parts[2];
 
-    if (!lrnPart.startsWith('lrn:') || !classPart.startsWith('class:')) {
-      debugPrint('Invalid QR prefixes: $rawValue');
-      return;
-    }
+    if (!lrnPart.startsWith('lrn:') || !classPart.startsWith('class:')) return;
 
     final names = namePart.split(',');
-    if (names.length != 2) {
-      debugPrint('Invalid name part: $namePart');
-      return;
-    }
+    if (names.length != 2) return;
 
     final surname = names[0].trim();
     final firstname = names[1].trim();
     final lrn = lrnPart.substring(4).trim();
     final scannedClassId = classPart.substring(6).trim();
 
-    // Validate LRN
     if (lrn.length != 12 || !RegExp(r'^\d{12}$').hasMatch(lrn)) {
       _showMessage('Invalid LRN in QR code', isError: true);
       return;
     }
 
-    // Validate class
     if (scannedClassId != widget.classId) {
       _showMessage('QR code is for a different class', isError: true);
       return;
     }
 
-    // ── Client-side cooldown check ──────────────────────────────────────────
     if (_isOnCooldown(lrn)) {
-      // Silently skip — no UI noise for rapid re-detects of the same QR
       debugPrint('Cooldown active for LRN $lrn — skipping');
       return;
     }
 
-    // ── Guard against concurrent requests ──────────────────────────────────
     if (_isProcessing) return;
 
-    // Record scan time immediately so concurrent frames can't slip through
     _markScanned(lrn);
-
     _recordAttendance(lrn, surname, firstname);
   }
-
-  // ── HTTP call ────────────────────────────────────────────────────────────────
 
   Future<void> _recordAttendance(
     String lrn,
@@ -180,22 +166,18 @@ class _QRScanScreenState extends State<QRScanScreen> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final studentName = data['student'] as String? ?? 'Student';
-
         setState(() {
           _lastScannedStudent = studentName;
           _successCount++;
         });
-
         _showMessage('✓ $studentName marked present', isError: false);
       } else if (response.statusCode == 429) {
-        // Server-side cooldown hit — update local map to match server window
         _markScanned(lrn);
         final msg =
             json.decode(response.body)['message'] as String? ??
             'Already scanned recently';
         _showMessage(msg, isError: true);
       } else if (response.statusCode == 409) {
-        // Already recorded today
         _markScanned(lrn);
         final studentName =
             json.decode(response.body)['student'] as String? ?? lrn;
@@ -207,12 +189,10 @@ class _QRScanScreenState extends State<QRScanScreen> {
         final err =
             json.decode(response.body)['message'] as String? ?? 'Unknown error';
         _showMessage('Failed: $err', isError: true);
-        // On failure, clear the cooldown so teacher can retry immediately
         _lastAcceptedAt.remove(lrn);
       }
     } catch (e) {
       _showMessage('Network error: $e', isError: true);
-      // On network failure, clear the cooldown so retry is possible
       _lastAcceptedAt.remove(lrn);
     } finally {
       if (mounted) setState(() => _isProcessing = false);
@@ -223,8 +203,202 @@ class _QRScanScreenState extends State<QRScanScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return _isScanSupported ? _buildScannerView() : _buildUnsupportedView();
+  }
+
+  // ── Unsupported platform screen ──────────────────────────────────────────────
+
+  Widget _buildUnsupportedView() {
     return Scaffold(
-      appBar: AppBar(actions: [BackButton()]),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Back button row
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+              ),
+
+              Expanded(
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // Icon
+                        Container(
+                          padding: const EdgeInsets.all(28),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.15),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.qr_code_scanner_rounded,
+                            size: 72,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 32),
+
+                        // Title
+                        const Text(
+                          'QR Scanning Not Available',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Description
+                        Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text(
+                            'QR code scanning requires a camera and is only supported on mobile devices (Android & iOS).\n\n'
+                            'To scan student attendance, please use the mobile app on your phone or tablet.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: Colors.white,
+                              height: 1.6,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 32),
+
+                        // Platform chips
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            _platformChip(
+                              Icons.android,
+                              'Android',
+                              Colors.green.shade400,
+                              supported: true,
+                            ),
+                            _platformChip(
+                              Icons.apple,
+                              'iOS',
+                              Colors.green.shade400,
+                              supported: true,
+                            ),
+                            _platformChip(
+                              Icons.computer_rounded,
+                              'Windows',
+                              Colors.red.shade300,
+                              supported: false,
+                            ),
+                            _platformChip(
+                              Icons.web_rounded,
+                              'Web',
+                              Colors.green.shade400,
+                              supported: true,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 40),
+
+                        // Back button
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () => Navigator.pop(context),
+                            icon: const Icon(Icons.arrow_back_rounded),
+                            label: const Text(
+                              'Go Back',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: const Color(0xFF667eea),
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              elevation: 0,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _platformChip(
+    IconData icon,
+    String label,
+    Color color, {
+    required bool supported,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: color.withOpacity(0.8), width: 1.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Icon(
+            supported ? Icons.check_circle_rounded : Icons.cancel_rounded,
+            size: 16,
+            color: color,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Camera scanner view (mobile only) ────────────────────────────────────────
+
+  Widget _buildScannerView() {
+    return Scaffold(
+      appBar: AppBar(automaticallyImplyLeading: false),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -238,14 +412,14 @@ class _QRScanScreenState extends State<QRScanScreen> {
             children: [
               // Camera view
               MobileScanner(
-                controller: controller,
+                controller: controller!,
                 onDetect: (capture) {
                   if (_isProcessing) return;
                   for (final barcode in capture.barcodes) {
                     final rawValue = barcode.rawValue;
                     if (rawValue != null) {
                       _processBarcode(rawValue);
-                      break; // process one barcode per frame
+                      break;
                     }
                   }
                 },
@@ -294,7 +468,7 @@ class _QRScanScreenState extends State<QRScanScreen> {
                 ),
               ),
 
-              // Custom header
+              // Header overlay
               Positioned(
                 top: 0,
                 left: 0,
@@ -336,19 +510,19 @@ class _QRScanScreenState extends State<QRScanScreen> {
                       const Spacer(),
                       IconButton(
                         icon: Icon(
-                          controller.torchEnabled
+                          controller!.torchEnabled
                               ? Icons.flash_on_rounded
                               : Icons.flash_off_rounded,
                           color: Colors.white,
                         ),
-                        onPressed: () => controller.toggleTorch(),
+                        onPressed: () => controller!.toggleTorch(),
                       ),
                       IconButton(
                         icon: const Icon(
                           Icons.flip_camera_ios_rounded,
                           color: Colors.white,
                         ),
-                        onPressed: () => controller.switchCamera(),
+                        onPressed: () => controller!.switchCamera(),
                       ),
                     ],
                   ),
@@ -421,7 +595,7 @@ class _QRScanScreenState extends State<QRScanScreen> {
                 ),
               ),
 
-              // Instructions at bottom
+              // Bottom instructions
               Positioned(
                 bottom: 0,
                 left: 0,
@@ -521,7 +695,7 @@ class _QRScanScreenState extends State<QRScanScreen> {
 
   @override
   void dispose() {
-    controller.dispose();
+    controller?.dispose();
     super.dispose();
   }
 }
