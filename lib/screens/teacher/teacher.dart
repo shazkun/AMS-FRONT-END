@@ -187,29 +187,38 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           ),
         ),
       ),
-
-      floatingActionButton: Container(
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(16)),
-        child: FloatingActionButton.extended(
-          onPressed: _openCreateSection,
-          elevation: 6,
-          highlightElevation: 12,
-          hoverElevation: 12,
-          backgroundColor: Colors.blue, // Keep transparent to show gradient
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          icon: const Icon(Icons.add_rounded, color: Colors.white, size: 24),
-          label: const Text(
-            'New Class',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
+      floatingActionButton:
+          myClasses.isNotEmpty
+              ? Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: FloatingActionButton.extended(
+                  onPressed: _openCreateSection,
+                  elevation: 6,
+                  highlightElevation: 12,
+                  hoverElevation: 12,
+                  backgroundColor:
+                      Colors.blue, // Keep transparent to show gradient
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  icon: const Icon(
+                    Icons.add_rounded,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                  label: const Text(
+                    'New Class',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              )
+              : null,
     );
   }
 

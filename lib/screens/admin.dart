@@ -1,3 +1,4 @@
+import 'package:attsys/widgets/logout.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -281,41 +282,41 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
 
     return Scaffold(
-      extendBodyBehindAppBar: isSmallScreen,
+      extendBodyBehindAppBar: true,
       drawer: null,
-      appBar:
-          isSmallScreen
-              ? AppBar(
-                backgroundColor: Colors.transparent,
-                elevation: 0,
-                flexibleSpace: Container(
-                  decoration: BoxDecoration(gradient: gradient),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        flexibleSpace: Container(decoration: BoxDecoration(gradient: gradient)),
+        title: Text(
+          'Admin Dashboard',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            shadows: [
+              Shadow(
+                blurRadius: 4,
+                color: Colors.black45,
+                offset: Offset(1, 1),
+              ),
+            ],
+          ),
+        ),
+        iconTheme: const IconThemeData(color: Colors.white),
+        leading:
+            selectedTeacherId == null
+                ? null
+                : IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () => setState(() => selectedTeacherId = null),
                 ),
-                title: Text(
-                  'Admin Dashboard',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    shadows: [
-                      Shadow(
-                        blurRadius: 4,
-                        color: Colors.black45,
-                        offset: Offset(1, 1),
-                      ),
-                    ],
-                  ),
-                ),
-                iconTheme: const IconThemeData(color: Colors.white),
-                leading:
-                    selectedTeacherId == null
-                        ? null
-                        : IconButton(
-                          icon: const Icon(Icons.arrow_back),
-                          onPressed:
-                              () => setState(() => selectedTeacherId = null),
-                        ),
-              )
-              : null,
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16.0),
+            child: LogoutButton(),
+          ),
+        ],
+      ),
       body: Container(
         decoration: BoxDecoration(gradient: gradient),
         child: SafeArea(
