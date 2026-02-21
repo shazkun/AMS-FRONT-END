@@ -134,7 +134,88 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     }
   }
 
-  /////////////////////////////////////////////////////////////////
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /// Returns only weekday (Mon–Fri) days for the current month.
+  List<int> _getSchoolDays({int? month, int? year}) {
+    final now = DateTime.now();
+    final m = month ?? now.month;
+    final y = year ?? now.year;
+    final daysInMonth = DateTime(y, m + 1, 0).day;
+    return [
+      for (int d = 1; d <= daysInMonth; d++)
+        if (DateTime(y, m, d).weekday <= 5) d,
+    ];
+  }
+
+  List<String> _getDayLabels(List<int> schoolDays, {int? month, int? year}) {
+    final now = DateTime.now();
+    final m = month ?? now.month;
+    final y = year ?? now.year;
+    const labels = ['M', 'T', 'W', 'TH', 'F'];
+    return schoolDays
+        .map((d) => labels[DateTime(y, m, d).weekday - 1])
+        .toList();
+  }
+
+  /// Converts a status string to a single-character cell value for SF2.
+  /// Present / Late → '' (blank, meaning attended)
+  /// Absent         → 'A'
+  /// Excused        → 'E'
+  String _statusToCell(String? status) {
+    switch (status) {
+      case 'Present':
+        return '';
+      case 'Late':
+        return 'L';
+      case 'Absent':
+        return 'A';
+      case 'Excused':
+        return 'E';
+      default:
+        return '';
+    }
+  }
+
+  // ── Fetch SF2 attendance from backend ──────────────────────────────────────
+  /// Returns a map of:  lrn → { dayNum(int) → status(String) }
+  Future<Map<String, Map<int, String>>> _fetchSF2Attendance({
+    int? month,
+    int? year,
+  }) async {
+    final token = await _getToken();
+    final url = ApiConfig.teacherSF2Attendance(
+      widget.classId,
+      month: month,
+      year: year,
+    );
+
+    final res = await http
+        .get(Uri.parse(url), headers: ApiConfig.headers(token))
+        .timeout(ApiConfig.timeout);
+
+    if (res.statusCode != 200) {
+      throw Exception('Failed to fetch attendance data (${res.statusCode})');
+    }
+
+    final body = json.decode(res.body) as Map<String, dynamic>;
+    final studentsList = body['students'] as List<dynamic>;
+
+    // Build lrn → { dayNum → status }
+    final Map<String, Map<int, String>> result = {};
+    for (final s in studentsList) {
+      final lrn = s['lrn'] as String;
+      final rawAttendance = s['attendance'] as Map<String, dynamic>? ?? {};
+      result[lrn] = {
+        for (final e in rawAttendance.entries)
+          int.parse(e.key):
+              (e.value as Map<String, dynamic>)['status'] as String,
+      };
+    }
+    return result;
+  }
+
+  // ── Export to Excel ────────────────────────────────────────────────────────
   Future<void> _exportToExcel() async {
     if (students.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -145,9 +226,11 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
       );
       return;
     }
+
     final schoolId = _schoolIdController.text.trim();
     final schoolYear = _schoolYearController.text.trim();
     final schoolName = _schoolNameController.text.trim();
+
     if (schoolId.isEmpty || schoolYear.isEmpty || schoolName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -157,17 +240,31 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
       );
       return;
     }
+
     setState(() => isExporting = true);
+
     try {
-      final excel = Excel.createExcel();
-      final sheet = excel['Sheet1'];
-      // Configure sheet name
-      excel.rename(
-        'Sheet1',
-        DateFormat('MMMM').format(DateTime.now()).toUpperCase(),
+      final now = DateTime.now();
+      // Fetch real attendance data from backend
+      final attendanceData = await _fetchSF2Attendance(
+        month: now.month,
+        year: now.year,
       );
-      // Title row
-      sheet.merge(CellIndex.indexByString('A1'), CellIndex.indexByString('N1'));
+
+      final schoolDays = _getSchoolDays();
+      const maxColumns = 20;
+      final displayDays =
+          schoolDays.length > maxColumns
+              ? schoolDays.sublist(0, maxColumns)
+              : schoolDays;
+      final displayDow = _getDayLabels(displayDays);
+
+      final excel = Excel.createExcel();
+      excel.rename('Sheet1', DateFormat('MMMM').format(now).toUpperCase());
+      final sheet = excel[DateFormat('MMMM').format(now).toUpperCase()];
+
+      // ── Title rows ──────────────────────────────────────────────────────────
+      sheet.merge(CellIndex.indexByString('A1'), CellIndex.indexByString('P1'));
       var titleCell = sheet.cell(CellIndex.indexByString('A1'));
       titleCell.value = TextCellValue(
         'School Form 2 (SF2) Daily Attendance Report of Learners',
@@ -177,8 +274,8 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         fontSize: 14,
         horizontalAlign: HorizontalAlign.Center,
       );
-      // Subtitle row
-      sheet.merge(CellIndex.indexByString('A2'), CellIndex.indexByString('N2'));
+
+      sheet.merge(CellIndex.indexByString('A2'), CellIndex.indexByString('P2'));
       var subtitleCell = sheet.cell(CellIndex.indexByString('A2'));
       subtitleCell.value = TextCellValue(
         '(This replaces Form 1, Form 2 & STS Form 4 - Absenteeism and Dropout Profile)',
@@ -187,7 +284,8 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         fontSize: 10,
         horizontalAlign: HorizontalAlign.Center,
       );
-      // School info
+
+      // ── School info rows ────────────────────────────────────────────────────
       sheet.merge(CellIndex.indexByString('A3'), CellIndex.indexByString('B3'));
       sheet.cell(CellIndex.indexByString('A3')).value = TextCellValue(
         'School ID',
@@ -202,7 +300,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
       sheet.cell(CellIndex.indexByString('J3')).value = TextCellValue(
         schoolYear,
       );
-      // School name
+
       sheet.merge(CellIndex.indexByString('A4'), CellIndex.indexByString('B4'));
       sheet.cell(CellIndex.indexByString('A4')).value = TextCellValue(
         'Name of School',
@@ -211,7 +309,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
       sheet.cell(CellIndex.indexByString('C4')).value = TextCellValue(
         schoolName,
       );
-      // Class name (Grade/Section)
+
       sheet.merge(CellIndex.indexByString('A5'), CellIndex.indexByString('B5'));
       sheet.cell(CellIndex.indexByString('A5')).value = TextCellValue(
         'Grade/Section',
@@ -220,73 +318,53 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
       sheet.cell(CellIndex.indexByString('C5')).value = TextCellValue(
         widget.className,
       );
-      // Column headers (shifted down due to added row)
+
+      sheet.merge(CellIndex.indexByString('K5'), CellIndex.indexByString('L5'));
+      sheet.cell(CellIndex.indexByString('K5')).value = TextCellValue('Month');
+      sheet.merge(CellIndex.indexByString('M5'), CellIndex.indexByString('P5'));
+      sheet.cell(CellIndex.indexByString('M5')).value = TextCellValue(
+        DateFormat('MMMM yyyy').format(now),
+      );
+
+      // ── Column headers row 6 ────────────────────────────────────────────────
+      // No. | NAME | SEX | day1 | day2 | ... | dayN
+      // Col 0: No.   Col 1: (merged)   Col 2: Name   Col 3: Sex   Col 4+: Days
+      final int dayColStart = 4;
+
       sheet.merge(CellIndex.indexByString('A6'), CellIndex.indexByString('B6'));
-      var noHeader = sheet.cell(CellIndex.indexByString('A6'));
-      noHeader.value = TextCellValue('No.');
-      noHeader.cellStyle = CellStyle(
-        bold: true,
-        horizontalAlign: HorizontalAlign.Center,
-      );
-      var nameHeader = sheet.cell(CellIndex.indexByString('C6'));
-      nameHeader.value = TextCellValue(
-        'NAME\n(Last Name, First Name, Middle Name)',
-      );
-      nameHeader.cellStyle = CellStyle(
-        bold: true,
-        horizontalAlign: HorizontalAlign.Center,
-      );
-      // Get current month's days
-      final now = DateTime.now();
-      final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
-      // Collect only weekdays (Mon-Fri)
-      List<int> schoolDays = [];
-      List<String> dayOfWeeks = [];
-      // Optional: Add holidays here if needed, e.g., Set<DateTime> holidays = {...};
-      for (int day = 1; day <= daysInMonth; day++) {
-        final date = DateTime(now.year, now.month, day);
-        final weekday = date.weekday;
-        if (weekday >= 1 && weekday <= 5 /* && !holidays.contains(date) */ ) {
-          schoolDays.add(day);
-          dayOfWeeks.add(['M', 'T', 'W', 'TH', 'F'][weekday - 1]);
-        }
-      }
-      // Limit to max 20 school days
-      const maxColumns = 20;
-      final displaySchoolDays =
-          schoolDays.length > maxColumns
-              ? schoolDays.sublist(0, maxColumns)
-              : schoolDays;
-      final displayDow =
-          dayOfWeeks.length > maxColumns
-              ? dayOfWeeks.sublist(0, maxColumns)
-              : dayOfWeeks;
-      // Date headers (only school days)
-      for (int i = 0; i < displaySchoolDays.length; i++) {
-        final day = displaySchoolDays[i];
-        final dow = displayDow[i];
-        final colIndex = i + 3; // Start from D (index 3)
-        var dayCell = sheet.cell(
-          CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: 6),
+      _headerCell(sheet, 'A6', 'No.');
+      _headerCell(sheet, 'C6', 'NAME\n(Last Name, First Name, Middle Name)');
+      _headerCell(sheet, 'D6', 'SEX');
+
+      for (int i = 0; i < displayDays.length; i++) {
+        final colIdx = dayColStart + i;
+        // Day number row
+        final dayCell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: colIdx, rowIndex: 5),
         );
-        dayCell.value = IntCellValue(day);
+        dayCell.value = IntCellValue(displayDays[i]);
         dayCell.cellStyle = CellStyle(
           bold: true,
           horizontalAlign: HorizontalAlign.Center,
         );
-        var dowCell = sheet.cell(
-          CellIndex.indexByColumnRow(columnIndex: colIndex, rowIndex: 7),
+        // Day-of-week row
+        final dowCell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: colIdx, rowIndex: 6),
         );
-        dowCell.value = TextCellValue(dow);
+        dowCell.value = TextCellValue(displayDow[i]);
         dowCell.cellStyle = CellStyle(
           bold: true,
           horizontalAlign: HorizontalAlign.Center,
         );
       }
-      // Student rows
+
+      // ── Student rows ────────────────────────────────────────────────────────
       for (int i = 0; i < students.length; i++) {
         final student = students[i];
-        final rowIndex = i + 8; // Shifted due to extra rows
+        final lrn = student['lrn'] as String;
+        final rowIndex =
+            i + 7; // rows 0-indexed; data starts at row 7 (row 8 in Excel)
+
         // Number
         sheet.merge(
           CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex),
@@ -297,58 +375,85 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
               CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex),
             )
             .value = IntCellValue(i + 1);
+
         // Name
-        final name =
-            '${student['surname'].toString().toUpperCase()}, ${student['firstname'].toString().toUpperCase()} ${student['middlename']?.toString().toUpperCase() ?? ''} ${student['suffix'] ?? ''}'
-                .trim();
+        final name = '${student['surname'].toString().toUpperCase()}, '
+                '${student['firstname'].toString().toUpperCase()} '
+                '${student['middlename']?.toString().toUpperCase() ?? ''} '
+                '${student['suffix'] ?? ''}'
+            .trim()
+            .replaceAll(RegExp(r' +'), ' ');
         sheet
             .cell(
               CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: rowIndex),
             )
             .value = TextCellValue(name);
-        // Attendance cells (empty, only for school days)
-        for (int j = 0; j < displaySchoolDays.length; j++) {
-          final colIndex = j + 3;
+
+        // Sex
+        final sexVal = student['sex'] as String? ?? '';
+        sheet
+            .cell(
+              CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: rowIndex),
+            )
+            .value = TextCellValue(sexVal);
+
+        // Attendance cells — populate from fetched data
+        final studentAttendance = attendanceData[lrn] ?? {};
+        for (int j = 0; j < displayDays.length; j++) {
+          final dayNum = displayDays[j];
+          final colIdx = dayColStart + j;
+          final status = studentAttendance[dayNum];
           sheet
               .cell(
                 CellIndex.indexByColumnRow(
-                  columnIndex: colIndex,
+                  columnIndex: colIdx,
                   rowIndex: rowIndex,
                 ),
               )
-              .value = TextCellValue('');
+              .value = TextCellValue(_statusToCell(status));
         }
       }
-      // Footer: Total school days
-      final footerRow = students.length + 9;
+
+      // ── Footer ──────────────────────────────────────────────────────────────
+      final footerRow = students.length + 8;
       sheet.merge(
         CellIndex.indexByString('A$footerRow'),
-        CellIndex.indexByString('C$footerRow'),
+        CellIndex.indexByString('D$footerRow'),
       );
       sheet.cell(CellIndex.indexByString('A$footerRow')).value = TextCellValue(
-        'Total School Days: ${displaySchoolDays.length}',
+        'Total School Days: ${displayDays.length}',
       );
-      // Column widths
+
+      // ── Column widths ───────────────────────────────────────────────────────
       sheet.setColumnWidth(0, 5);
       sheet.setColumnWidth(1, 5);
-      sheet.setColumnWidth(2, 35); // Wider for names
-      final usedColumns = 3 + displaySchoolDays.length;
-      for (int i = 3; i < usedColumns; i++) {
+      sheet.setColumnWidth(2, 35);
+      sheet.setColumnWidth(3, 8); // SEX column
+      for (int i = dayColStart; i < dayColStart + displayDays.length; i++) {
         sheet.setColumnWidth(i, 6);
       }
-      // Generate file bytes
+
+      // ── Legend ──────────────────────────────────────────────────────────────
+      final legendRow = students.length + 10;
+      sheet.cell(CellIndex.indexByString('A$legendRow')).value = TextCellValue(
+        'Legend: blank = Present, L = Late, A = Absent, E = Excused',
+      );
+
+      // ── Save ────────────────────────────────────────────────────────────────
       final fileBytes = excel.save();
       if (fileBytes == null || fileBytes.isEmpty) {
         throw Exception('Excel save returned null or empty bytes');
       }
+
       final fileName =
-          'SF2_${widget.className}_${DateFormat('yyyy-MM-dd').format(DateTime.now())}.xlsx';
-      // Download file using platform-specific implementation
+          'SF2_${widget.className}_${DateFormat('yyyy-MM').format(now)}.xlsx';
+
       await downloadFile(
         Uint8List.fromList(fileBytes),
         fileName,
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       );
+
       if (mounted) {
         setState(() => isExporting = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -371,7 +476,17 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     }
   }
 
-  //////////////////////////
+  /// Helper: set header cell style
+  void _headerCell(Sheet sheet, String address, String text) {
+    final cell = sheet.cell(CellIndex.indexByString(address));
+    cell.value = TextCellValue(text);
+    cell.cellStyle = CellStyle(
+      bold: true,
+      horizontalAlign: HorizontalAlign.Center,
+    );
+  }
+
+  // ── Export to PDF ──────────────────────────────────────────────────────────
   Future<void> _exportToPDF() async {
     if (students.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -400,34 +515,23 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     setState(() => isExporting = true);
 
     try {
-      final pdf = pw.Document();
       final now = DateTime.now();
-      final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+      // Fetch real attendance data from backend
+      final attendanceData = await _fetchSF2Attendance(
+        month: now.month,
+        year: now.year,
+      );
 
-      // Collect only weekdays (Mon-Fri)
-      List<int> schoolDays = [];
-      List<String> dayOfWeeks = [];
-      // Optional: Set<DateTime> holidays = {...}; // Add holidays here
-      for (int day = 1; day <= daysInMonth; day++) {
-        final date = DateTime(now.year, now.month, day);
-        final weekday = date.weekday;
-        if (weekday >= 1 && weekday <= 5 /* && !holidays.contains(date) */ ) {
-          schoolDays.add(day);
-          dayOfWeeks.add(['M', 'T', 'W', 'TH', 'F'][weekday - 1]);
-        }
-      }
-      // Limit to max 20 school days
+      final schoolDays = _getSchoolDays();
       const maxColumns = 20;
-      final displaySchoolDays =
+      final displayDays =
           schoolDays.length > maxColumns
               ? schoolDays.sublist(0, maxColumns)
               : schoolDays;
-      final displayDow =
-          dayOfWeeks.length > maxColumns
-              ? dayOfWeeks.sublist(0, maxColumns)
-              : dayOfWeeks;
+      final displayDow = _getDayLabels(displayDays);
+      final numDayColumns = displayDays.length;
 
-      final numDayColumns = displaySchoolDays.length;
+      final pdf = pw.Document();
 
       pdf.addPage(
         pw.Page(
@@ -442,7 +546,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                   child: pw.Text(
                     'School Form 2 (SF2) Daily Attendance Report of Learners',
                     style: pw.TextStyle(
-                      fontSize: 16,
+                      fontSize: 14,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
@@ -454,7 +558,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                     style: const pw.TextStyle(fontSize: 9),
                   ),
                 ),
-                pw.SizedBox(height: 12),
+                pw.SizedBox(height: 8),
 
                 // School info
                 pw.Row(
@@ -466,6 +570,10 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                     ),
                     pw.Text(
                       'School Year: $schoolYear',
+                      style: const pw.TextStyle(fontSize: 10),
+                    ),
+                    pw.Text(
+                      'Month: ${DateFormat('MMMM yyyy').format(now)}',
                       style: const pw.TextStyle(fontSize: 10),
                     ),
                   ],
@@ -481,72 +589,44 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                     fontWeight: pw.FontWeight.bold,
                   ),
                 ),
-                pw.SizedBox(height: 12),
+                pw.SizedBox(height: 8),
 
                 // Table
                 pw.Table(
                   border: pw.TableBorder.all(width: 0.5),
                   columnWidths: {
-                    0: const pw.FixedColumnWidth(30), // No.
-                    1: const pw.FixedColumnWidth(200), // Name (wider)
-                    ...Map.fromIterable(
-                      List.generate(numDayColumns, (i) => i + 2),
-                      key: (i) => i,
-                      value:
-                          (i) => const pw.FixedColumnWidth(
-                            25,
-                          ), // Dynamic width for days
-                    ),
+                    0: const pw.FixedColumnWidth(25), // No.
+                    1: const pw.FixedColumnWidth(175), // Name
+                    2: const pw.FixedColumnWidth(25), // Sex
+                    ...{
+                      for (int i = 0; i < numDayColumns; i++)
+                        i + 3: const pw.FixedColumnWidth(20),
+                    },
                   },
                   children: [
-                    // Header row - No. | NAME | school days...
+                    // Header row 1: labels
                     pw.TableRow(
+                      decoration: const pw.BoxDecoration(
+                        color: PdfColors.grey200,
+                      ),
                       children: [
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(2),
-                          child: pw.Center(
-                            child: pw.Text(
-                              'No.',
-                              style: pw.TextStyle(
-                                fontSize: 8,
-                                fontWeight: pw.FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.all(2),
-                          child: pw.Center(
-                            child: pw.Text(
-                              'NAME',
-                              style: pw.TextStyle(
-                                fontSize: 8,
-                                fontWeight: pw.FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
+                        _pdfHeaderCell('No.'),
+                        _pdfHeaderCell('NAME'),
+                        _pdfHeaderCell('SEX'),
                         ...List.generate(
                           numDayColumns,
-                          (i) => pw.Padding(
-                            padding: const pw.EdgeInsets.all(2),
-                            child: pw.Center(
-                              child: pw.Text(
-                                '${displaySchoolDays[i]}',
-                                style: pw.TextStyle(
-                                  fontSize: 7,
-                                  fontWeight: pw.FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
+                          (i) => _pdfHeaderCell('${displayDays[i]}'),
                         ),
                       ],
                     ),
 
-                    // Day of week row
+                    // Header row 2: day-of-week
                     pw.TableRow(
+                      decoration: const pw.BoxDecoration(
+                        color: PdfColors.grey100,
+                      ),
                       children: [
+                        pw.Container(),
                         pw.Container(),
                         pw.Container(),
                         ...List.generate(
@@ -568,9 +648,15 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                     ...students.asMap().entries.map((entry) {
                       final index = entry.key;
                       final student = entry.value;
-                      final name =
-                          '${student['surname'].toString().toUpperCase()}, ${student['firstname'].toString().toUpperCase()} ${student['middlename']?.toString().toUpperCase() ?? ''} ${student['suffix'] ?? ''}'
-                              .trim();
+                      final lrn = student['lrn'] as String;
+                      final name = '${student['surname'].toString().toUpperCase()}, '
+                              '${student['firstname'].toString().toUpperCase()} '
+                              '${student['middlename']?.toString().toUpperCase() ?? ''} '
+                              '${student['suffix'] ?? ''}'
+                          .trim()
+                          .replaceAll(RegExp(r' +'), ' ');
+                      final sex = student['sex'] as String? ?? '';
+                      final studentAttendance = attendanceData[lrn] ?? {};
 
                       return pw.TableRow(
                         children: [
@@ -590,21 +676,46 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                               style: const pw.TextStyle(fontSize: 7),
                             ),
                           ),
-                          ...List.generate(
-                            numDayColumns,
-                            (i) => pw.Container(
-                              height: 15,
-                            ), // Empty attendance cells
+                          pw.Padding(
+                            padding: const pw.EdgeInsets.all(2),
+                            child: pw.Center(
+                              child: pw.Text(
+                                sex,
+                                style: const pw.TextStyle(fontSize: 7),
+                              ),
+                            ),
                           ),
+                          ...List.generate(numDayColumns, (i) {
+                            final dayNum = displayDays[i];
+                            final status = studentAttendance[dayNum];
+                            final cellText = _statusToCell(status);
+                            final isAbsent = cellText == 'A';
+                            return pw.Container(
+                              height: 14,
+                              alignment: pw.Alignment.center,
+                              color: isAbsent ? PdfColors.red100 : null,
+                              child: pw.Text(
+                                cellText,
+                                style: pw.TextStyle(
+                                  fontSize: 7,
+                                  color:
+                                      isAbsent
+                                          ? PdfColors.red
+                                          : PdfColors.black,
+                                ),
+                              ),
+                            );
+                          }),
                         ],
                       );
                     }),
                   ],
                 ),
-                pw.SizedBox(height: 12),
+
+                pw.SizedBox(height: 8),
                 pw.Text(
-                  'Total School Days: ${numDayColumns}',
-                  style: const pw.TextStyle(fontSize: 10),
+                  'Total School Days: $numDayColumns   |   Legend: blank = Present, L = Late, A = Absent, E = Excused',
+                  style: const pw.TextStyle(fontSize: 8),
                 ),
               ],
             );
@@ -612,17 +723,14 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         ),
       );
 
-      // Generate PDF bytes
       final pdfBytes = await pdf.save();
       final fileName =
-          'SF2_${widget.className}_${DateFormat('yyyy-MM-dd').format(DateTime.now())}.pdf';
+          'SF2_${widget.className}_${DateFormat('yyyy-MM').format(now)}.pdf';
 
-      // Download file using platform-specific implementation
       await downloadFile(pdfBytes, fileName, 'application/pdf');
 
       if (mounted) {
         setState(() => isExporting = false);
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('PDF downloaded: $fileName'),
@@ -643,7 +751,19 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     }
   }
 
-  ////////////////////////////////////////////////////
+  pw.Widget _pdfHeaderCell(String text) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(2),
+      child: pw.Center(
+        child: pw.Text(
+          text,
+          style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
+  // ── Export options sheet ───────────────────────────────────────────────────
   void _showExportOptions() {
     showModalBottomSheet(
       context: context,
@@ -713,6 +833,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     );
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -798,7 +919,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Add student + school info card
+                          // School info + add student card
                           Container(
                             padding: const EdgeInsets.all(20),
                             decoration: BoxDecoration(
@@ -1132,6 +1253,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                       final initials =
                                           '${s['firstname'][0]}${s['surname'][0]}'
                                               .toUpperCase();
+                                      final sex = s['sex'] as String? ?? '';
 
                                       return Padding(
                                         padding: const EdgeInsets.only(
@@ -1176,7 +1298,8 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                                 ),
                                                 if (s['birthday'] != null)
                                                   Text(
-                                                    'Birthday: ${s['birthday']}',
+                                                    'Birthday: ${s['birthday']}'
+                                                    '${sex.isNotEmpty ? ' · $sex' : ''}',
                                                     style: TextStyle(
                                                       fontSize: 12,
                                                       color:

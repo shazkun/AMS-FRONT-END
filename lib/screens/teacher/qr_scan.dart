@@ -25,67 +25,46 @@ class _QRScanScreenState extends State<QRScanScreen> {
     torchEnabled: false,
   );
 
-  final Map<String, DateTime> _lastScannedLRN = {};
-  static const int cooldownSeconds = 5;
-  bool isProcessing = false;
+  /// Maps LRN → timestamp of the last time it was accepted for processing.
+  /// Prevents the same QR code from being re-processed within [_cooldownDuration].
+  final Map<String, DateTime> _lastAcceptedAt = {};
 
-  String? lastScannedStudent;
-  int successCount = 0;
+  /// Client-side cooldown: ignore a QR that was already scanned within this window.
+  /// The server enforces its own 30 s window; this prevents flooding the API.
+  static const Duration _cooldownDuration = Duration(seconds: 10);
+
+  /// True while an HTTP request is in flight.
+  bool _isProcessing = false;
+
+  String? _lastScannedStudent;
+  int _successCount = 0;
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
   Future<String?> _getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('token');
   }
 
-  Future<void> _recordAttendance(
-    String lrn,
-    String surname,
-    String firstname,
-  ) async {
-    if (isProcessing) return;
-    setState(() => isProcessing = true);
+  /// Returns true if [lrn] is still within its cooldown window.
+  bool _isOnCooldown(String lrn) {
+    final last = _lastAcceptedAt[lrn];
+    if (last == null) return false;
+    return DateTime.now().difference(last) < _cooldownDuration;
+  }
 
-    try {
-      final token = await _getToken();
-      if (token == null) {
-        _showMessage('Authentication token missing', isError: true);
-        return;
-      }
+  /// Records [lrn] as "just scanned now".
+  void _markScanned(String lrn) {
+    _lastAcceptedAt[lrn] = DateTime.now();
 
-      final payload = '$surname,$firstname|lrn:$lrn|class:${widget.classId}';
-
-      final response = await http
-          .post(
-            Uri.parse(ApiConfig.teacherRecordScan),
-            headers: ApiConfig.headers(token),
-            body: json.encode({'payload': payload}),
-          )
-          .timeout(ApiConfig.timeout);
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final studentName = data['student'] ?? 'Student';
-
-        setState(() {
-          lastScannedStudent = studentName;
-          successCount++;
-        });
-
-        _showMessage('✓ $studentName marked present', isError: false);
-      } else {
-        final err = json.decode(response.body)['message'] ?? 'Unknown error';
-        _showMessage('Failed: $err', isError: true);
-      }
-    } catch (e) {
-      _showMessage('Network error: $e', isError: true);
-    } finally {
-      setState(() => isProcessing = false);
-    }
+    // Prune stale entries to keep memory bounded
+    _lastAcceptedAt.removeWhere(
+      (_, ts) => DateTime.now().difference(ts) > _cooldownDuration * 3,
+    );
   }
 
   void _showMessage(String msg, {required bool isError}) {
     if (!mounted) return;
-
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -110,12 +89,16 @@ class _QRScanScreenState extends State<QRScanScreen> {
     );
   }
 
+  // ── Core scan handler ────────────────────────────────────────────────────────
+
+  /// Called by [MobileScanner.onDetect]. Validates format, enforces client-side
+  /// cooldown, then calls [_recordAttendance].
   void _processBarcode(String rawValue) {
     // Expected format: surname,firstname|lrn:123456789012|class:1
     final parts = rawValue.split('|');
     if (parts.length != 3) {
       debugPrint(
-        'Invalid QR format: $rawValue (expected 3 parts, got ${parts.length})',
+        'Invalid QR format ($rawValue): expected 3 pipe-separated parts',
       );
       return;
     }
@@ -124,50 +107,119 @@ class _QRScanScreenState extends State<QRScanScreen> {
     final lrnPart = parts[1];
     final classPart = parts[2];
 
-    // Validate format
     if (!lrnPart.startsWith('lrn:') || !classPart.startsWith('class:')) {
       debugPrint('Invalid QR prefixes: $rawValue');
       return;
     }
 
-    // Extract values
     final names = namePart.split(',');
     if (names.length != 2) {
-      debugPrint('Invalid name format: $namePart');
+      debugPrint('Invalid name part: $namePart');
       return;
     }
 
     final surname = names[0].trim();
     final firstname = names[1].trim();
-
-    final lrn = lrnPart.substring(4);
-    final scannedClassId = classPart.substring(6);
+    final lrn = lrnPart.substring(4).trim();
+    final scannedClassId = classPart.substring(6).trim();
 
     // Validate LRN
     if (lrn.length != 12 || !RegExp(r'^\d{12}$').hasMatch(lrn)) {
-      _showMessage('Invalid LRN format', isError: true);
+      _showMessage('Invalid LRN in QR code', isError: true);
       return;
     }
 
-    // Check if QR is for correct class
+    // Validate class
     if (scannedClassId != widget.classId) {
       _showMessage('QR code is for a different class', isError: true);
       return;
     }
 
-    // Check cooldown
-    final now = DateTime.now();
-    if (_lastScannedLRN.containsKey(lrn)) {
-      final diff = now.difference(_lastScannedLRN[lrn]!).inSeconds;
-      if (diff < cooldownSeconds) {
-        debugPrint('Cooldown active for LRN: $lrn');
-        return;
-      }
+    // ── Client-side cooldown check ──────────────────────────────────────────
+    if (_isOnCooldown(lrn)) {
+      // Silently skip — no UI noise for rapid re-detects of the same QR
+      debugPrint('Cooldown active for LRN $lrn — skipping');
+      return;
     }
 
-    _lastScannedLRN[lrn] = now;
+    // ── Guard against concurrent requests ──────────────────────────────────
+    if (_isProcessing) return;
+
+    // Record scan time immediately so concurrent frames can't slip through
+    _markScanned(lrn);
+
     _recordAttendance(lrn, surname, firstname);
   }
+
+  // ── HTTP call ────────────────────────────────────────────────────────────────
+
+  Future<void> _recordAttendance(
+    String lrn,
+    String surname,
+    String firstname,
+  ) async {
+    setState(() => _isProcessing = true);
+
+    try {
+      final token = await _getToken();
+      if (token == null) {
+        _showMessage('Authentication token missing', isError: true);
+        return;
+      }
+
+      final payload = '$surname,$firstname|lrn:$lrn|class:${widget.classId}';
+
+      final response = await http
+          .post(
+            Uri.parse(ApiConfig.teacherRecordScan),
+            headers: ApiConfig.headers(token),
+            body: json.encode({'payload': payload}),
+          )
+          .timeout(ApiConfig.timeout);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final studentName = data['student'] as String? ?? 'Student';
+
+        setState(() {
+          _lastScannedStudent = studentName;
+          _successCount++;
+        });
+
+        _showMessage('✓ $studentName marked present', isError: false);
+      } else if (response.statusCode == 429) {
+        // Server-side cooldown hit — update local map to match server window
+        _markScanned(lrn);
+        final msg =
+            json.decode(response.body)['message'] as String? ??
+            'Already scanned recently';
+        _showMessage(msg, isError: true);
+      } else if (response.statusCode == 409) {
+        // Already recorded today
+        _markScanned(lrn);
+        final studentName =
+            json.decode(response.body)['student'] as String? ?? lrn;
+        _showMessage(
+          '$studentName — attendance already recorded today',
+          isError: true,
+        );
+      } else {
+        final err =
+            json.decode(response.body)['message'] as String? ?? 'Unknown error';
+        _showMessage('Failed: $err', isError: true);
+        // On failure, clear the cooldown so teacher can retry immediately
+        _lastAcceptedAt.remove(lrn);
+      }
+    } catch (e) {
+      _showMessage('Network error: $e', isError: true);
+      // On network failure, clear the cooldown so retry is possible
+      _lastAcceptedAt.remove(lrn);
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  // ── Build ────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -188,13 +240,12 @@ class _QRScanScreenState extends State<QRScanScreen> {
               MobileScanner(
                 controller: controller,
                 onDetect: (capture) {
-                  if (isProcessing) return;
-
+                  if (_isProcessing) return;
                   for (final barcode in capture.barcodes) {
                     final rawValue = barcode.rawValue;
                     if (rawValue != null) {
                       _processBarcode(rawValue);
-                      break;
+                      break; // process one barcode per frame
                     }
                   }
                 },
@@ -208,7 +259,7 @@ class _QRScanScreenState extends State<QRScanScreen> {
                   decoration: BoxDecoration(
                     border: Border.all(
                       color:
-                          isProcessing
+                          _isProcessing
                               ? const Color(0xFFFF9800)
                               : const Color(0xFF4CAF50),
                       width: 3,
@@ -216,7 +267,7 @@ class _QRScanScreenState extends State<QRScanScreen> {
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child:
-                      isProcessing
+                      _isProcessing
                           ? const Center(
                             child: CircularProgressIndicator(
                               color: Color(0xFFFF9800),
@@ -345,7 +396,7 @@ class _QRScanScreenState extends State<QRScanScreen> {
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              '$successCount',
+                              '$_successCount',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
@@ -355,10 +406,10 @@ class _QRScanScreenState extends State<QRScanScreen> {
                           ),
                         ],
                       ),
-                      if (lastScannedStudent != null) ...[
+                      if (_lastScannedStudent != null) ...[
                         const SizedBox(height: 8),
                         Text(
-                          'Last: $lastScannedStudent',
+                          'Last: $_lastScannedStudent',
                           style: const TextStyle(
                             color: Colors.green,
                             fontSize: 12,
@@ -392,7 +443,7 @@ class _QRScanScreenState extends State<QRScanScreen> {
                   child: Column(
                     children: [
                       Icon(
-                        isProcessing
+                        _isProcessing
                             ? Icons.hourglass_empty_rounded
                             : Icons.qr_code_scanner_rounded,
                         color: Colors.white.withOpacity(0.85),
@@ -400,7 +451,7 @@ class _QRScanScreenState extends State<QRScanScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        isProcessing
+                        _isProcessing
                             ? 'Processing...'
                             : 'Align student QR code in the frame',
                         textAlign: TextAlign.center,

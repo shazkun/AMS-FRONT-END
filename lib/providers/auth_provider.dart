@@ -1,3 +1,4 @@
+import 'package:attsys/config/api_config.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -16,7 +17,7 @@ class AuthProvider extends ChangeNotifier {
   // ======================
   Future<void> login(String username, String password) async {
     final response = await http.post(
-      Uri.parse('https://ams-backend-o4va.onrender.com/api/auth/login'),
+      Uri.parse(ApiConfig.authLogin),
       headers: {'Content-Type': 'application/json'},
       body: json.encode({'username': username, 'password': password}),
     );
@@ -34,7 +35,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   // ======================
-  // REGISTER
+  // REGISTER — includes sex field for students
   // ======================
   Future<void> register({
     required String username,
@@ -45,6 +46,7 @@ class AuthProvider extends ChangeNotifier {
     String? surname,
     String? suffix,
     String? birthday,
+    String? sex, // 'Male' or 'Female'
   }) async {
     final body = {'username': username, 'password': password, 'role': role};
 
@@ -55,6 +57,7 @@ class AuthProvider extends ChangeNotifier {
         'surname': surname ?? '',
         'suffix': suffix ?? '',
         'birthday': birthday ?? '',
+        if (sex != null && sex.isNotEmpty) 'sex': sex,
       });
     }
 
@@ -65,7 +68,6 @@ class AuthProvider extends ChangeNotifier {
     );
 
     if (response.statusCode == 201) {
-      // Optionally auto-login or just notify
       notifyListeners();
     } else {
       throw Exception('Registration failed: ${response.body}');
