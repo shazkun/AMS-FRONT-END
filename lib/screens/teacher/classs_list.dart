@@ -1360,6 +1360,15 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                               color: Colors.grey.shade300,
                                             ),
                                           ),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              16,
+                                            ),
+                                            borderSide: const BorderSide(
+                                              color: Color(0xFF667eea),
+                                              width: 2,
+                                            ),
+                                          ),
                                           contentPadding:
                                               const EdgeInsets.symmetric(
                                                 vertical: 16,
@@ -1392,6 +1401,15 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                               color: Colors.grey.shade300,
                                             ),
                                           ),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              16,
+                                            ),
+                                            borderSide: const BorderSide(
+                                              color: Color(0xFF667eea),
+                                              width: 2,
+                                            ),
+                                          ),
                                           contentPadding:
                                               const EdgeInsets.symmetric(
                                                 vertical: 16,
@@ -1418,6 +1436,13 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                       borderRadius: BorderRadius.circular(16),
                                       borderSide: BorderSide(
                                         color: Colors.grey.shade300,
+                                      ),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      borderSide: const BorderSide(
+                                        color: Color(0xFF667eea),
+                                        width: 2,
                                       ),
                                     ),
                                     contentPadding: const EdgeInsets.symmetric(
