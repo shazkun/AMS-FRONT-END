@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import '../config/api_config.dart';
 
 class AdminDashboard extends StatefulWidget {
@@ -19,6 +18,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   List<dynamic> teacherClasses = [];
   bool loadingTeachers = true;
   bool loadingClasses = false;
+  String searchQuery = '';
 
   @override
   void initState() {
@@ -49,19 +49,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           loadingTeachers = false;
         });
       } else {
-        Fluttertoast.showToast(
-          msg: 'Failed to load teachers (${res.statusCode})',
-          backgroundColor: Colors.redAccent,
-          textColor: Colors.white,
-        );
         setState(() => loadingTeachers = false);
       }
     } catch (e) {
-      Fluttertoast.showToast(
-        msg: 'Network error: $e',
-        backgroundColor: Colors.redAccent,
-        textColor: Colors.white,
-      );
       setState(() => loadingTeachers = false);
     }
   }
@@ -96,27 +86,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
           loadingClasses = false;
         });
       } else {
-        Fluttertoast.showToast(
-          msg: 'Failed to load classes',
-          backgroundColor: Colors.redAccent,
-        );
         setState(() => loadingClasses = false);
       }
     } catch (e) {
-      Fluttertoast.showToast(
-        msg: 'Error: $e',
-        backgroundColor: Colors.redAccent,
-      );
       setState(() => loadingClasses = false);
     }
   }
 
   Future<void> _createClassForTeacher() async {
     if (selectedTeacherId == null) {
-      Fluttertoast.showToast(
-        msg: 'Select a teacher first',
-        backgroundColor: Colors.redAccent,
-      );
       return;
     }
 
@@ -202,10 +180,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   final grade = gradeController.text.trim();
 
                   if (name.isEmpty || grade.isEmpty) {
-                    Fluttertoast.showToast(
-                      msg: 'Class name and grade required',
-                      backgroundColor: Colors.redAccent,
-                    );
                     return;
                   }
 
@@ -230,25 +204,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         .timeout(ApiConfig.timeout);
 
                     if (res.statusCode == 201) {
-                      Fluttertoast.showToast(
-                        msg: 'Class created',
-                        backgroundColor: Colors.green,
-                      );
                       Navigator.pop(context);
                       _loadTeacherClasses(selectedTeacherId!);
                     } else {
                       final msg = json.decode(res.body)['message'] ?? 'Failed';
-                      Fluttertoast.showToast(
-                        msg: msg,
-                        backgroundColor: Colors.redAccent,
-                      );
                     }
-                  } catch (e) {
-                    Fluttertoast.showToast(
-                      msg: 'Error: $e',
-                      backgroundColor: Colors.redAccent,
-                    );
-                  }
+                  } catch (e) {}
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF667eea),
@@ -302,23 +263,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           .timeout(ApiConfig.timeout);
 
       if (res.statusCode == 200 || res.statusCode == 204) {
-        Fluttertoast.showToast(
-          msg: 'Class deleted',
-          backgroundColor: Colors.green,
-        );
         _loadTeacherClasses(selectedTeacherId!);
-      } else {
-        Fluttertoast.showToast(
-          msg: 'Failed to delete',
-          backgroundColor: Colors.redAccent,
-        );
-      }
-    } catch (e) {
-      Fluttertoast.showToast(
-        msg: 'Error: $e',
-        backgroundColor: Colors.redAccent,
-      );
-    }
+      } else {}
+    } catch (e) {}
   }
 
   @override
@@ -335,7 +282,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     return Scaffold(
       extendBodyBehindAppBar: isSmallScreen,
-      drawer: isSmallScreen ? Drawer(child: _buildTeacherList()) : null,
+      drawer: null,
       appBar:
           isSmallScreen
               ? AppBar(
@@ -385,44 +332,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return Column(
       children: [
         if (selectedTeacherId == null)
-          Expanded(
-            child: Builder(
-              builder: (BuildContext innerContext) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.school_rounded,
-                        size: 80,
-                        color: Colors.white70,
-                      ),
-                      const SizedBox(height: 24),
-                      const Text(
-                        'Select a teacher to view classes',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 20, color: Colors.white70),
-                      ),
-                      const SizedBox(height: 32),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.menu),
-                        label: const Text('Show Teachers'),
-                        onPressed: () => Scaffold.of(innerContext).openDrawer(),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white.withOpacity(0.9),
-                          foregroundColor: const Color(0xFF667eea),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 14,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          )
+          Expanded(child: _buildTeacherList())
         else
           Expanded(child: _buildClassesPanel()),
       ],
@@ -496,6 +406,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: TextField(
+              onChanged: (value) {
+                setState(() {
+                  searchQuery = value.trim();
+                });
+              },
+              decoration: InputDecoration(
+                hintText: 'Search teachers...',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                filled: true,
+                fillColor: Colors.grey.shade50,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           Expanded(
             child:
                 loadingTeachers
@@ -511,72 +441,95 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         style: TextStyle(color: Colors.grey, fontSize: 16),
                       ),
                     )
-                    : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      itemCount: teachers.length,
-                      itemBuilder: (context, index) {
-                        final teacher = teachers[index];
-                        final isSelected =
-                            selectedTeacherId == teacher['id'].toString();
-                        final name =
-                            teacher['name'] ??
-                            '${teacher['firstname'] ?? ''} ${teacher['surname'] ?? ''}'
-                                .trim();
+                    : () {
+                      final filteredTeachers =
+                          searchQuery.isEmpty
+                              ? teachers
+                              : teachers.where((teacher) {
+                                final name =
+                                    teacher['name'] ??
+                                    '${teacher['firstname'] ?? ''} ${teacher['surname'] ?? ''}'
+                                        .trim();
+                                return name.toLowerCase().contains(
+                                  searchQuery.toLowerCase(),
+                                );
+                              }).toList();
 
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color:
-                                  isSelected
-                                      ? const Color(0xFF667eea).withOpacity(0.1)
-                                      : null,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor:
-                                    isSelected
-                                        ? const Color(0xFF667eea)
-                                        : Colors.grey.shade300,
-                                child: Icon(
-                                  Icons.person_rounded,
-                                  color:
-                                      isSelected
-                                          ? Colors.white
-                                          : Colors.grey.shade700,
-                                ),
-                              ),
-                              title: Text(
-                                name.isEmpty ? 'Unknown' : name,
-                                style: TextStyle(
-                                  fontWeight:
-                                      isSelected
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
-                                  color: Colors.black87,
-                                ),
-                              ),
-                              subtitle: Text(
-                                '${teacher['classes_count'] ?? 0} classes • ID: ${teacher['id']}',
-                                style: TextStyle(
-                                  color:
-                                      isSelected
-                                          ? const Color(0xFF667eea)
-                                          : Colors.grey.shade700,
-                                ),
-                              ),
-                              onTap: () {
-                                _loadTeacherClasses(teacher['id'].toString());
-                                if (MediaQuery.of(context).size.width < 720) {
-                                  Navigator.pop(context);
-                                }
-                              },
-                            ),
+                      if (filteredTeachers.isEmpty) {
+                        return const Center(
+                          child: Text(
+                            'No teachers match the search',
+                            style: TextStyle(color: Colors.grey, fontSize: 16),
                           ),
                         );
-                      },
-                    ),
+                      }
+
+                      return ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        itemCount: filteredTeachers.length,
+                        itemBuilder: (context, index) {
+                          final teacher = filteredTeachers[index];
+                          final isSelected =
+                              selectedTeacherId == teacher['id'].toString();
+                          final name =
+                              teacher['name'] ??
+                              '${teacher['firstname'] ?? ''} ${teacher['surname'] ?? ''}'
+                                  .trim();
+
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color:
+                                    isSelected
+                                        ? const Color(
+                                          0xFF667eea,
+                                        ).withOpacity(0.1)
+                                        : null,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor:
+                                      isSelected
+                                          ? const Color(0xFF667eea)
+                                          : Colors.grey.shade300,
+                                  child: Icon(
+                                    Icons.person_rounded,
+                                    color:
+                                        isSelected
+                                            ? Colors.white
+                                            : Colors.grey.shade700,
+                                  ),
+                                ),
+                                title: Text(
+                                  name.isEmpty ? 'Unknown' : name,
+                                  style: TextStyle(
+                                    fontWeight:
+                                        isSelected
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '${teacher['classes_count'] ?? 0} classes • ID: ${teacher['id']}',
+                                  style: TextStyle(
+                                    color:
+                                        isSelected
+                                            ? const Color(0xFF667eea)
+                                            : Colors.grey.shade700,
+                                  ),
+                                ),
+                                onTap: () {
+                                  _loadTeacherClasses(teacher['id'].toString());
+                                },
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    }(),
           ),
         ],
       ),
@@ -627,7 +580,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      color: Colors.black87,
+                      color: Colors.white,
                     ),
                   ),
                 ],
@@ -739,10 +692,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                     Icons.edit_rounded,
                                     color: Colors.blue,
                                   ),
-                                  onPressed:
-                                      () => Fluttertoast.showToast(
-                                        msg: 'Edit feature coming soon',
-                                      ),
+                                  onPressed: () {},
                                 ),
                                 IconButton(
                                   icon: const Icon(

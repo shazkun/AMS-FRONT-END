@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:attsys/widgets/logout.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
@@ -534,12 +535,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                   }
                 },
               ),
-              IconButton(
-                icon: const Icon(Icons.logout, color: Colors.white),
-                onPressed: () {
-                  Provider.of<AuthProvider>(context, listen: false).logout();
-                },
-              ),
+              LogoutButton(),
             ],
           ),
 

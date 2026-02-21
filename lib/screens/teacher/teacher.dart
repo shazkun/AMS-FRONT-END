@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:attsys/widgets/logout.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
@@ -144,19 +145,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                       tooltip: 'Refresh',
                       onPressed: _loadMyClasses,
                     ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.logout_rounded,
-                        color: Colors.redAccent,
-                      ),
-                      tooltip: 'Logout',
-                      onPressed: () {
-                        Provider.of<AuthProvider>(
-                          context,
-                          listen: false,
-                        ).logout();
-                      },
-                    ),
+                    LogoutButton(),
                   ],
                 ),
               ),
