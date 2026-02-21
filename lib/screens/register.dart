@@ -1,6 +1,7 @@
 import 'package:attsys/providers/auth_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -16,11 +17,45 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _firstnameController = TextEditingController();
   final _surnameController = TextEditingController();
   final _suffixController = TextEditingController();
-  final _birthdayController = TextEditingController();
 
   String? _selectedRole = 'student';
+  String? _selectedSex;
+  DateTime? _selectedBirthday;
   bool _isLoading = false;
   String? _error;
+
+  Future<void> _pickBirthday() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedBirthday ?? DateTime(now.year - 12),
+      firstDate: DateTime(1990),
+      lastDate: DateTime(now.year - 4),
+      helpText: 'Select Birthday',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF667eea),
+              onPrimary: Colors.white,
+              onSurface: Colors.black87,
+            ),
+            dialogBackgroundColor: Colors.white,
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF667eea),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() => _selectedBirthday = picked);
+    }
+  }
 
   Future<void> _register() async {
     setState(() {
@@ -43,7 +78,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
               _suffixController.text.trim().isEmpty
                   ? null
                   : _suffixController.text.trim(),
-          birthday: _birthdayController.text.trim(),
+          birthday:
+              _selectedBirthday != null
+                  ? DateFormat('yyyy-MM-dd').format(_selectedBirthday!)
+                  : '',
+          sex: _selectedSex,
         );
       } else {
         await auth.register(
@@ -92,7 +131,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Header / Icon
                     const Icon(
                       Icons.person_add_rounded,
                       size: 80,
@@ -121,7 +159,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                     const SizedBox(height: 48),
 
-                    // Main form card
                     Container(
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
@@ -154,37 +191,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                           const SizedBox(height: 20),
 
+                          // Role dropdown
                           DropdownButtonFormField<String>(
                             value: _selectedRole,
-                            decoration: InputDecoration(
-                              labelText: "Role",
-                              prefixIcon: const Icon(
-                                Icons.school_rounded,
-                                color: Color(0xFF667eea),
-                              ),
-                              filled: true,
-                              fillColor: Colors.grey.shade50,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide.none,
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: BorderSide(
-                                  color: Colors.grey.shade300,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                borderSide: const BorderSide(
-                                  color: Color(0xFF667eea),
-                                  width: 2,
-                                ),
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                vertical: 16,
-                                horizontal: 20,
-                              ),
+                            decoration: _dropdownDecoration(
+                              label: "Role",
+                              icon: Icons.school_rounded,
                             ),
                             items: const [
                               DropdownMenuItem(
@@ -197,12 +209,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                             ],
                             onChanged:
-                                (value) =>
-                                    setState(() => _selectedRole = value),
+                                (value) => setState(() {
+                                  _selectedRole = value;
+                                  if (value != 'student') {
+                                    _selectedSex = null;
+                                    _selectedBirthday = null;
+                                  }
+                                }),
                           ),
 
                           const SizedBox(height: 24),
 
+                          // Student-only fields
                           if (_selectedRole == 'student') ...[
                             _buildTextField(
                               controller: _lrnController,
@@ -234,21 +252,82 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             const SizedBox(height: 20),
 
-                            _buildTextField(
-                              controller: _suffixController,
-                              label: "Suffix (optional)",
-                              icon: Icons.text_fields_rounded,
-                            ),
-                            const SizedBox(height: 20),
-
-                            _buildTextField(
-                              controller: _birthdayController,
-                              label: "Birthday (YYYY-MM-DD)",
-                              icon: Icons.cake_rounded,
-                              keyboardType: TextInputType.datetime,
-                              hint: "e.g. 2010-05-15",
+                            // Sex dropdown
+                            DropdownButtonFormField<String>(
+                              value: _selectedSex,
+                              decoration: _dropdownDecoration(
+                                label: "Sex",
+                                icon: Icons.wc_rounded,
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'Male',
+                                  child: Text('Male'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Female',
+                                  child: Text('Female'),
+                                ),
+                              ],
+                              onChanged:
+                                  (value) =>
+                                      setState(() => _selectedSex = value),
                             ),
                           ],
+                          const SizedBox(height: 20),
+
+                          _buildTextField(
+                            controller: _suffixController,
+                            label: "Suffix (optional)",
+                            icon: Icons.text_fields_rounded,
+                          ),
+                          const SizedBox(height: 20),
+
+                          // Birthday date picker button
+                          GestureDetector(
+                            onTap: _pickBirthday,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 12,
+                                horizontal: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade50,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.cake_rounded,
+                                    color: Color(0xFF667eea),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      _selectedBirthday != null
+                                          ? DateFormat(
+                                            'MMMM dd, yyyy',
+                                          ).format(_selectedBirthday!)
+                                          : 'Birthday',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color:
+                                            _selectedBirthday != null
+                                                ? Colors.black87
+                                                : Colors.grey.shade600,
+                                      ),
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.calendar_today_rounded,
+                                    size: 18,
+                                    color: Colors.grey.shade500,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
 
                           const SizedBox(height: 12),
 
@@ -265,7 +344,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                             ),
 
-                          // Register Button
+                          // Register button
                           ElevatedButton(
                             onPressed: _isLoading ? null : _register,
                             style: ElevatedButton.styleFrom(
@@ -324,7 +403,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                     const SizedBox(height: 32),
 
-                    // Back to login
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -354,6 +432,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  InputDecoration _dropdownDecoration({
+    required String label,
+    required IconData icon,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, color: const Color(0xFF667eea)),
+      filled: true,
+      fillColor: Colors.grey.shade50,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(color: Colors.grey.shade300),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFF667eea), width: 2),
+      ),
+      contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
     );
   }
 
@@ -407,7 +510,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _firstnameController.dispose();
     _surnameController.dispose();
     _suffixController.dispose();
-    _birthdayController.dispose();
     super.dispose();
   }
 }

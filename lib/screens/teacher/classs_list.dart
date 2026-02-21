@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:attsys/config/api_config.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -8,6 +9,7 @@ import 'package:excel/excel.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
+import 'package:file_picker/file_picker.dart';
 import 'dltype/file_download_mobile.dart';
 import 'student_profile.dart';
 
@@ -32,6 +34,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
   bool isLoading = true;
   String? errorMessage;
   bool isExporting = false;
+  bool isImporting = false;
 
   final TextEditingController _lrnController = TextEditingController();
   final TextEditingController _schoolIdController = TextEditingController(
@@ -763,6 +766,357 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     );
   }
 
+  // ── CSV / XLSX Import ───────────────────────────────────────────────────────
+
+  /// Parses a raw string as CSV, returning a list of rows (each row = list of cells).
+  /// Handles quoted fields and comma delimiters.
+  List<List<String>> _parseCsv(String content) {
+    final rows = <List<String>>[];
+    for (final line in content.split(RegExp(r'\r?\n'))) {
+      if (line.trim().isEmpty) continue;
+      final cells = <String>[];
+      bool inQuotes = false;
+      final buf = StringBuffer();
+      for (int i = 0; i < line.length; i++) {
+        final ch = line[i];
+        if (ch == '"') {
+          if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+            buf.write('"');
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (ch == ',' && !inQuotes) {
+          cells.add(buf.toString().trim());
+          buf.clear();
+        } else {
+          buf.write(ch);
+        }
+      }
+      cells.add(buf.toString().trim());
+      rows.add(cells);
+    }
+    return rows;
+  }
+
+  /// Finds the column index for [header] in [headers] list (case-insensitive).
+  int _colIndex(List<String> headers, String header) =>
+      headers.indexWhere((h) => h.toLowerCase() == header.toLowerCase());
+
+  /// Downloads a blank CSV template the teacher can fill in.
+  Future<void> _downloadImportTemplate() async {
+    const content =
+        'lrn,firstname,surname,suffix,middlename,birthday,sex\n'
+        '123456789012,Juan,Dela Cruz,,Santos,2010-05-15,Male\n'
+        '123456789013,Maria,Reyes,Jr.,Lopez,2011-03-22,Female\n';
+
+    await downloadFile(
+      Uint8List.fromList(content.codeUnits),
+      'student_import_template.csv',
+      'text/csv',
+    );
+  }
+
+  /// Picks a CSV or XLSX file, parses it, and bulk-enrolls students.
+  Future<void> _importStudents() async {
+    // Pick file
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['csv', 'xlsx', 'xls'],
+      withData: true,
+    );
+
+    if (result == null || result.files.isEmpty) return;
+
+    final file = result.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) return;
+
+    final ext = (file.extension ?? '').toLowerCase();
+
+    // Parse rows → [ { lrn, firstname, surname, suffix, middlename, birthday, sex } ]
+    List<Map<String, String>> rows = [];
+    try {
+      if (ext == 'csv') {
+        rows = _parseCsvBytes(bytes);
+      } else {
+        rows = _parseXlsxBytes(bytes);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to parse file: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (rows.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No valid rows found in file'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Confirm before importing
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text('Import Students'),
+            content: Text(
+              'Found ${rows.length} student${rows.length != 1 ? 's' : ''} in the file.\n\n'
+              'Students already registered will be enrolled by LRN.\n'
+              'Unregistered LRNs will be skipped.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF667eea),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Import'),
+              ),
+            ],
+          ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => isImporting = true);
+
+    int success = 0;
+    int skipped = 0;
+    final List<String> errors = [];
+
+    for (final row in rows) {
+      final lrn = row['lrn'] ?? '';
+      if (lrn.isEmpty ||
+          lrn.length != 12 ||
+          !RegExp(r'^\d{12}$').hasMatch(lrn)) {
+        errors.add('Invalid LRN: "$lrn"');
+        continue;
+      }
+
+      try {
+        final token = await _getToken();
+        final res = await http
+            .post(
+              Uri.parse(ApiConfig.teacherClassStudents(widget.classId)),
+              headers: ApiConfig.headers(token),
+              body: json.encode({'lrn': lrn}),
+            )
+            .timeout(ApiConfig.timeout);
+
+        if (res.statusCode == 201) {
+          success++;
+        } else if (res.statusCode == 409) {
+          skipped++; // already enrolled
+        } else {
+          final msg = json.decode(res.body)['message'] ?? 'Error';
+          errors.add('LRN $lrn: $msg');
+        }
+      } catch (e) {
+        errors.add('LRN $lrn: network error');
+      }
+    }
+
+    setState(() => isImporting = false);
+    _loadStudents();
+
+    if (!mounted) return;
+
+    // Result summary dialog
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text('Import Complete'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _importResultRow(
+                  Icons.check_circle,
+                  Colors.green,
+                  '$success student${success != 1 ? 's' : ''} enrolled',
+                ),
+                if (skipped > 0)
+                  _importResultRow(
+                    Icons.info,
+                    Colors.orange,
+                    '$skipped already enrolled (skipped)',
+                  ),
+                if (errors.isNotEmpty) ...[
+                  _importResultRow(
+                    Icons.error,
+                    Colors.red,
+                    '${errors.length} failed',
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 120),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(
+                        errors.join('\n'),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.red.shade800,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF667eea),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Done'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  Widget _importResultRow(IconData icon, Color color, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 14))),
+        ],
+      ),
+    );
+  }
+
+  /// Parses CSV bytes into a list of row maps.
+  List<Map<String, String>> _parseCsvBytes(Uint8List bytes) {
+    final content = utf8.decode(bytes, allowMalformed: true);
+    final allRows = _parseCsv(content);
+    if (allRows.isEmpty) return [];
+
+    // First row = headers
+    final headers = allRows.first.map((h) => h.trim()).toList();
+    final lrnIdx = _colIndex(headers, 'lrn');
+    final firstIdx = _colIndex(headers, 'firstname');
+    final surnameIdx = _colIndex(headers, 'surname');
+    final suffixIdx = _colIndex(headers, 'suffix');
+    final middleIdx = _colIndex(headers, 'middlename');
+    final birthdayIdx = _colIndex(headers, 'birthday');
+    final sexIdx = _colIndex(headers, 'sex');
+
+    if (lrnIdx == -1) throw Exception('Missing "lrn" column');
+
+    return allRows.skip(1).where((r) => r.isNotEmpty).map((row) {
+      String cell(int idx) => idx >= 0 && idx < row.length ? row[idx] : '';
+      return {
+        'lrn': cell(lrnIdx),
+        'firstname': cell(firstIdx),
+        'surname': cell(surnameIdx),
+        'suffix': cell(suffixIdx),
+        'middlename': cell(middleIdx),
+        'birthday': cell(birthdayIdx),
+        'sex': cell(sexIdx),
+      };
+    }).toList();
+  }
+
+  /// Parses XLSX bytes into a list of row maps.
+  List<Map<String, String>> _parseXlsxBytes(Uint8List bytes) {
+    final excel = Excel.decodeBytes(bytes);
+    // Use the first sheet that has data
+    Sheet? sheet;
+    for (final name in excel.tables.keys) {
+      final s = excel.tables[name];
+      if (s != null && s.rows.isNotEmpty) {
+        sheet = s;
+        break;
+      }
+    }
+    if (sheet == null) throw Exception('No sheet found in file');
+
+    final rows = sheet.rows;
+    if (rows.isEmpty) return [];
+
+    // First row = headers
+    final headers =
+        rows.first
+            .map((c) => (c?.value?.toString() ?? '').trim().toLowerCase())
+            .toList();
+
+    final lrnIdx = headers.indexOf('lrn');
+    final firstIdx = headers.indexOf('firstname');
+    final surnameIdx = headers.indexOf('surname');
+    final suffixIdx = headers.indexOf('suffix');
+    final birthdayIdx = headers.indexOf('birthday');
+    final sexIdx = headers.indexOf('sex');
+
+    if (lrnIdx == -1) throw Exception('Missing "lrn" column');
+
+    String cellVal(List<Data?> row, int idx) {
+      if (idx < 0 || idx >= row.length) return '';
+      final v = row[idx]?.value;
+      if (v == null) return '';
+      // Excel may store dates as doubles
+      if (v is DateTime) return DateFormat('yyyy-MM-dd').format(v as DateTime);
+      return v.toString().trim();
+    }
+
+    return rows
+        .skip(1)
+        .where((r) => r.isNotEmpty)
+        .map(
+          (row) => {
+            'lrn': cellVal(row, lrnIdx),
+            'firstname': cellVal(row, firstIdx),
+            'surname': cellVal(row, surnameIdx),
+            'suffix': cellVal(row, suffixIdx),
+            'birthday': cellVal(row, birthdayIdx),
+            'sex': cellVal(row, sexIdx),
+          },
+        )
+        .where((r) => r['lrn']!.isNotEmpty)
+        .toList();
+  }
+
   // ── Export options sheet ───────────────────────────────────────────────────
   void _showExportOptions() {
     showModalBottomSheet(
@@ -827,6 +1181,27 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                     _exportToPDF();
                   },
                 ),
+                const Divider(height: 24),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.download_for_offline_rounded,
+                      color: Colors.blue.shade700,
+                    ),
+                  ),
+                  title: const Text('Download Import Template'),
+                  subtitle: const Text('CSV template with correct columns'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _downloadImportTemplate();
+                  },
+                ),
               ],
             ),
           ),
@@ -840,6 +1215,22 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         actions: [
+          // Import button — always visible so teacher can import even before students are added
+          IconButton(
+            icon:
+                isImporting
+                    ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                    : const Icon(Icons.upload_file_rounded),
+            tooltip: 'Import Students (CSV / XLSX)',
+            onPressed: isImporting ? null : _importStudents,
+          ),
           if (!isLoading && students.isNotEmpty)
             IconButton(
               icon:
@@ -961,6 +1352,14 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                             ),
                                             borderSide: BorderSide.none,
                                           ),
+                                          enabledBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              16,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: Colors.grey.shade300,
+                                            ),
+                                          ),
                                           contentPadding:
                                               const EdgeInsets.symmetric(
                                                 vertical: 16,
@@ -976,7 +1375,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                         controller: _schoolYearController,
                                         decoration: InputDecoration(
                                           labelText: 'School Year',
-                                          hintText: '2025-2026',
+
                                           filled: true,
                                           fillColor: Colors.grey.shade50,
                                           border: OutlineInputBorder(
@@ -984,6 +1383,14 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                               12,
                                             ),
                                             borderSide: BorderSide.none,
+                                          ),
+                                          enabledBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              16,
+                                            ),
+                                            borderSide: BorderSide(
+                                              color: Colors.grey.shade300,
+                                            ),
                                           ),
                                           contentPadding:
                                               const EdgeInsets.symmetric(
@@ -1006,6 +1413,12 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
                                       borderSide: BorderSide.none,
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      borderSide: BorderSide(
+                                        color: Colors.grey.shade300,
+                                      ),
                                     ),
                                     contentPadding: const EdgeInsets.symmetric(
                                       vertical: 16,
