@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AMS — Attendance Management System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --grad-a: #667eea;
+      --grad-b: #764ba2;
+      --accent: #667eea;
+      --purple: #764ba2;
+      --danger: #e53935;
+      --success: #43a047;
+      --warn: #fb8c00;
+      --bg: #f4f5fb;
+      --card: #ffffff;
+      --text: #1a1a2e;
+      --muted: #6b7280;
+      --border: #e5e7f0;
+      --code-bg: #1e1e2e;
+      --radius: 14px;
+      --shadow: 0 4px 24px rgba(102,126,234,0.10);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────── */
+    .layout { display: flex; min-height: 100vh; }
+
+    /* ── Sidebar ─────────────────────────────────────────────── */
+    .sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      background: linear-gradient(160deg, var(--grad-a), var(--grad-b));
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 28px 0 28px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+
+    .sidebar-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 24px 24px;
+      border-bottom: 1px solid rgba(255,255,255,0.15);
+      margin-bottom: 16px;
+    }
+
+    .sidebar-logo .icon {
+      width: 42px; height: 42px;
+      background: rgba(255,255,255,0.18);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+    }
+
+    .sidebar-logo .brand { color: white; }
+    .sidebar-logo .brand strong { display: block; font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+    .sidebar-logo .brand span { font-size: 12px; opacity: 0.65; }
+
+    .nav-section {
+      padding: 0 16px 6px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.45);
+      margin-top: 14px;
+    }
+
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 18px;
+      margin: 2px 10px;
+      border-radius: 10px;
+      color: rgba(255,255,255,0.80);
+      text-decoration: none;
+      font-size: 13.5px;
+      font-weight: 500;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .nav-link:hover, .nav-link.active {
+      background: rgba(255,255,255,0.18);
+      color: white;
+    }
+
+    .nav-link .dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.4); flex-shrink: 0; }
+    .nav-link.active .dot { background: white; }
+
+    .sidebar-dl {
+      margin: auto 16px 0;
+      padding-top: 20px;
+    }
+
+    .dl-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 11px 16px;
+      background: rgba(255,255,255,0.92);
+      color: var(--purple);
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 13px;
+      text-decoration: none;
+      transition: background 0.15s, transform 0.1s;
+    }
+
+    .dl-btn:hover { background: white; transform: translateY(-1px); }
+
+    /* ── Content ─────────────────────────────────────────────── */
+    .content {
+      flex: 1;
+      min-width: 0;
+      padding: 48px 52px 80px;
+      max-width: 860px;
+    }
+
+    /* ── Hero ─────────────────────────────────────────────────── */
+    .hero {
+      background: linear-gradient(135deg, var(--grad-a), var(--grad-b));
+      border-radius: var(--radius);
+      padding: 44px 40px;
+      margin-bottom: 40px;
+      color: white;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -40px; right: -40px;
+      width: 200px; height: 200px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.06);
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: -60px; right: 60px;
+      width: 280px; height: 280px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.04);
+    }
+
+    .hero h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 8px; }
+    .hero p { font-size: 15px; opacity: 0.85; max-width: 520px; margin-bottom: 24px; }
+
+    .hero-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+    .badge {
+      padding: 4px 12px;
+      background: rgba(255,255,255,0.18);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .hero-btns { display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn-primary {
+      padding: 11px 22px;
+      background: white;
+      color: var(--purple);
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 14px;
+      text-decoration: none;
+      display: inline-flex; align-items: center; gap: 7px;
+      transition: transform 0.1s, box-shadow 0.15s;
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(0,0,0,0.18); }
+    .btn-ghost {
+      padding: 11px 22px;
+      background: rgba(255,255,255,0.15);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 14px;
+      text-decoration: none;
+      display: inline-flex; align-items: center; gap: 7px;
+      transition: background 0.15s;
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,0.25); }
+
+    /* ── Download cards ──────────────────────────────────────── */
+    .dl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 40px; }
+    .dl-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+      text-decoration: none;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .dl-card:hover { transform: translateY(-3px); box-shadow: 0 10px 32px rgba(102,126,234,0.18); }
+    .dl-card .dl-icon {
+      width: 44px; height: 44px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+    .dl-card.web .dl-icon    { background: #eef0ff; }
+    .dl-card.android .dl-icon { background: #e8f5e9; }
+    .dl-card.win .dl-icon    { background: #e3f2fd; }
+    .dl-card strong { display: block; font-size: 14px; font-weight: 700; }
+    .dl-card span { font-size: 12px; color: var(--muted); }
+    .dl-arrow { margin-left: auto; color: var(--accent); font-size: 18px; opacity: 0.6; }
+
+    /* ── Sections ────────────────────────────────────────────── */
+    section { margin-bottom: 56px; }
+    section:target { scroll-margin-top: 24px; }
+
+    h2 {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      color: var(--text);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    h2::after {
+      content: '';
+      flex: 1;
+      height: 2px;
+      background: linear-gradient(to right, var(--border), transparent);
+      border-radius: 1px;
+    }
+
+    h3 { font-size: 16px; font-weight: 700; margin: 20px 0 10px; color: var(--text); }
+    h4 { font-size: 14px; font-weight: 700; margin: 16px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+    p { margin-bottom: 12px; font-size: 15px; }
+
+    /* ── Role cards ──────────────────────────────────────────── */
+    .role-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin: 16px 0; }
+    .role-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: var(--shadow);
+      border-top: 3px solid var(--accent);
+    }
+    .role-card.teacher { border-color: var(--warn); }
+    .role-card.student { border-color: var(--success); }
+    .role-card h3 { font-size: 15px; margin: 8px 0 6px; }
+    .role-card .emoji { font-size: 28px; }
+    .role-card p { font-size: 13px; color: var(--muted); margin: 0; }
+
+    /* ── Steps ───────────────────────────────────────────────── */
+    .steps { list-style: none; counter-reset: step; }
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      gap: 16px;
+      margin-bottom: 18px;
+      position: relative;
+    }
+    .steps li::before {
+      content: counter(step);
+      min-width: 28px; height: 28px;
+      background: linear-gradient(135deg, var(--grad-a), var(--grad-b));
+      color: white;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .steps li .step-body strong { display: block; font-size: 14px; margin-bottom: 3px; }
+    .steps li .step-body p { font-size: 13.5px; color: var(--muted); margin: 0; }
+
+    /* ── Code ────────────────────────────────────────────────── */
+    pre {
+      background: var(--code-bg);
+      color: #cdd6f4;
+      border-radius: 12px;
+      padding: 18px 20px;
+      overflow-x: auto;
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      margin: 12px 0 20px;
+    }
+    code {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      background: #eef0ff;
+      color: var(--purple);
+      padding: 2px 7px;
+      border-radius: 5px;
+    }
+    pre code { background: transparent; color: inherit; padding: 0; }
+
+    .kw   { color: #cba6f7; } /* keyword */
+    .str  { color: #a6e3a1; } /* string */
+    .cm   { color: #6c7086; } /* comment */
+    .num  { color: #fab387; } /* number */
+    .fn   { color: #89b4fa; } /* function */
+
+    /* ── Callout ─────────────────────────────────────────────── */
+    .callout {
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin: 14px 0;
+      font-size: 14px;
+      display: flex;
+      gap: 10px;
+    }
+    .callout.warn  { background: #fff8e1; border-left: 3px solid var(--warn); }
+    .callout.info  { background: #e8f4fd; border-left: 3px solid #42a5f5; }
+    .callout.danger { background: #ffebee; border-left: 3px solid var(--danger); }
+    .callout.tip   { background: #e8f5e9; border-left: 3px solid var(--success); }
+    .callout .icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+
+    /* ── Table ───────────────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; margin: 14px 0 24px; font-size: 14px; }
+    thead tr { background: linear-gradient(135deg, var(--grad-a), var(--grad-b)); color: white; }
+    thead th { padding: 11px 14px; text-align: left; font-weight: 600; }
+    tbody tr:nth-child(even) { background: #f8f9ff; }
+    tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    tbody td code { font-size: 12px; }
+
+    /* ── Method badges ───────────────────────────────────────── */
+    .get    { background: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 5px; font-size: 12px; font-weight: 700; font-family: 'DM Mono', monospace; }
+    .post   { background: #e3f2fd; color: #1565c0; padding: 2px 8px; border-radius: 5px; font-size: 12px; font-weight: 700; font-family: 'DM Mono', monospace; }
+    .put    { background: #fff8e1; color: #e65100; padding: 2px 8px; border-radius: 5px; font-size: 12px; font-weight: 700; font-family: 'DM Mono', monospace; }
+    .delete { background: #ffebee; color: #b71c1c; padding: 2px 8px; border-radius: 5px; font-size: 12px; font-weight: 700; font-family: 'DM Mono', monospace; }
+
+    /* ── Mobile ──────────────────────────────────────────────── */
+    .mobile-nav {
+      display: none;
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: white;
+      border-top: 1px solid var(--border);
+      padding: 8px 0 12px;
+      z-index: 100;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+    }
+
+    .mobile-nav-links { display: flex; justify-content: space-around; }
+    .mobile-nav-links a { display: flex; flex-direction: column; align-items: center; gap: 3px; text-decoration: none; color: var(--muted); font-size: 10px; font-weight: 600; padding: 4px 8px; border-radius: 8px; }
+    .mobile-nav-links a .mn-icon { font-size: 20px; }
+    .mobile-nav-links a.active { color: var(--accent); }
+
+    .mobile-header {
+      display: none;
+      background: linear-gradient(135deg, var(--grad-a), var(--grad-b));
+      padding: 16px 20px;
+      color: white;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 99;
+    }
+    .mobile-header strong { font-size: 17px; font-weight: 800; }
+    .mobile-header span { font-size: 12px; opacity: 0.7; }
+
+    @media (max-width: 760px) {
+      .sidebar { display: none; }
+      .mobile-header { display: flex; }
+      .mobile-nav { display: block; }
+      .content { padding: 28px 20px 100px; }
+      .hero { padding: 28px 22px; }
+      .hero h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ── Sidebar ─────────────────────────────────────────────── -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <div class="icon">📋</div>
+      <div class="brand">
+        <strong>AMS Docs</strong>
+        <span>v1.0.0</span>
+      </div>
+    </div>
+
+    <div class="nav-section">Getting Started</div>
+    <a href="#overview"    class="nav-link active"><span class="dot"></span> Overview</a>
+    <a href="#download"    class="nav-link"><span class="dot"></span> Download</a>
+    <a href="#setup"       class="nav-link"><span class="dot"></span> Setup & Install</a>
+
+    <div class="nav-section">Tutorials</div>
+    <a href="#admin"       class="nav-link"><span class="dot"></span> 🛡️ Admin Panel</a>
+    <a href="#teacher"     class="nav-link"><span class="dot"></span> 👨‍🏫 Teacher App</a>
+    <a href="#student"     class="nav-link"><span class="dot"></span> 🎓 Student App</a>
+
+    <div class="nav-section">Reference</div>
+    <a href="#api"         class="nav-link"><span class="dot"></span> API Reference</a>
+    <a href="#deployment"  class="nav-link"><span class="dot"></span> Deployment</a>
+
+    <div class="sidebar-dl">
+      <a href="../../releases/latest/download/ams-web-v1.0.0.zip" class="dl-btn">
+        ⬇️ Download Latest
+      </a>
+    </div>
+  </nav>
+
+  <!-- ── Mobile header ─────────────────────────────────────────── -->
+  <div class="mobile-header">
+    <div style="font-size:26px">📋</div>
+    <div>
+      <strong>AMS Docs</strong><br>
+      <span>Attendance Management System</span>
+    </div>
+  </div>
+
+  <!-- ── Content ──────────────────────────────────────────────── -->
+  <main class="content">
+
+    <!-- Hero -->
+    <div class="hero">
+      <h1>📋 Attendance Management System</h1>
+      <p>A full-stack school attendance platform with QR-based scanning, admin control panel, and SF2 report generation.</p>
+      <div class="hero-badges">
+        <span class="badge">Flutter 3.x</span>
+        <span class="badge">Node.js + Express</span>
+        <span class="badge">MySQL 8.0</span>
+        <span class="badge">JWT Auth</span>
+        <span class="badge">QR Scanning</span>
+      </div>
+      <div class="hero-btns">
+        <a href="../../releases/latest/download/ams-web-v1.0.0.zip" class="btn-primary">⬇️ Download Web App</a>
+        <a href="https://github.com/your-username/ams" class="btn-ghost">⭐ View on GitHub</a>
+      </div>
+    </div>
+
+    <!-- Download -->
+    <section id="download">
+      <h2>📥 Download</h2>
+      <p>Choose your platform below. All builds are from the <a href="../../releases/latest" style="color:var(--accent)">latest release</a>.</p>
+      <div class="dl-grid">
+        <a href="../../releases/latest/download/ams-web-v1.0.0.zip" class="dl-card web">
+          <div class="dl-icon">🌐</div>
+          <div>
+            <strong>Web App</strong>
+            <span>HTML · v1.0.0</span>
+          </div>
+          <div class="dl-arrow">↓</div>
+        </a>
+        <a href="../../releases/latest/download/ams-v1.0.0.apk" class="dl-card android">
+          <div class="dl-icon">📱</div>
+          <div>
+            <strong>Android APK</strong>
+            <span>APK · v1.0.0</span>
+          </div>
+          <div class="dl-arrow">↓</div>
+        </a>
+        <a href="../../releases/latest/download/ams-windows-v1.0.0.zip" class="dl-card win">
+          <div class="dl-icon">🖥️</div>
+          <div>
+            <strong>Windows</strong>
+            <span>ZIP · v1.0.0</span>
+          </div>
+          <div class="dl-arrow">↓</div>
+        </a>
+      </div>
+    </section>
+
+    <!-- Overview -->
+    <section id="overview">
+      <h2>🧭 Overview</h2>
+      <p>AMS has three user roles, each with their own interface and capabilities:</p>
+      <div class="role-grid">
+        <div class="role-card admin">
+          <div class="emoji">🛡️</div>
+          <h3>Admin</h3>
+          <p>Full control — manage teachers, students, and classes. View all enrollment data.</p>
+        </div>
+        <div class="role-card teacher">
+          <div class="emoji">👨‍🏫</div>
+          <h3>Teacher</h3>
+          <p>Manage classes, open attendance sessions, scan QR codes to mark students present.</p>
+        </div>
+        <div class="role-card student">
+          <div class="emoji">🎓</div>
+          <h3>Student</h3>
+          <p>View enrolled classes, check attendance history, and show personal QR code.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Setup -->
+    <section id="setup">
+      <h2>⚙️ Setup & Install</h2>
+
+      <h3>Prerequisites</h3>
+      <table>
+        <thead><tr><th>Tool</th><th>Version</th></tr></thead>
+        <tbody>
+          <tr><td>Flutter</td><td>3.x</td></tr>
+          <tr><td>Node.js</td><td>18+</td></tr>
+          <tr><td>MySQL</td><td>8.0+</td></tr>
+        </tbody>
+      </table>
+
+      <h3>1. Clone the repository</h3>
+      <pre><code>git clone https://github.com/your-username/ams.git
+cd ams</code></pre>
+
+      <h3>2. Configure the backend</h3>
+      <pre><code><span class="cm"># Install dependencies</span>
+cd backend
+npm install
+
+<span class="cm"># Create .env file</span>
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=<span class="str">your_password</span>
+DB_NAME=ams_db
+JWT_SECRET=<span class="str">your_jwt_secret</span>
+PORT=3000</code></pre>
+
+      <h3>3. Run the database migration</h3>
+      <pre><code>mysql -u root -p ams_db &lt; database/schema.sql</code></pre>
+
+      <h3>4. Start the backend server</h3>
+      <pre><code>npm start
+<span class="cm"># Server runs on http://localhost:3000</span></code></pre>
+
+      <h3>5. Configure the Flutter app</h3>
+      <p>Open <code>lib/config/api_config.dart</code> and update the URL:</p>
+      <pre><code><span class="kw">static const</span> String _devUrl = <span class="str">'http://your-backend-url.com'</span>;</code></pre>
+
+      <h3>6. Run the Flutter app</h3>
+      <pre><code>flutter pub get
+flutter run</code></pre>
+    </section>
+
+    <!-- Admin Tutorial -->
+    <section id="admin">
+      <h2>🛡️ Tutorial: Admin Panel</h2>
+      <p>Log in with your admin credentials. The layout adapts to your screen:</p>
+
+      <div class="callout info">
+        <span class="icon">💡</span>
+        <div><strong>Responsive layout:</strong> On screens ≥ 720px you'll see a persistent left sidebar. On smaller screens, use the bottom navigation bar to switch tabs.</div>
+      </div>
+
+      <!-- Teachers -->
+      <h3>👩‍🏫 Managing Teachers</h3>
+      <h4>Add a Teacher</h4>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Go to the Teachers tab</strong><p>Click "Teachers" in the sidebar or bottom nav.</p></div></li>
+        <li><div class="step-body"><strong>Click "Add Teacher"</strong><p>The button is in the top-right of the panel.</p></div></li>
+        <li><div class="step-body"><strong>Fill in the form</strong><p>First name, surname, email (optional), username, and password are required.</p></div></li>
+        <li><div class="step-body"><strong>Click Save</strong><p>The teacher account is created and they can now log in.</p></div></li>
+      </ol>
+      <div class="callout warn">
+        <span class="icon">⚠️</span>
+        <div>Username must be unique. If it already exists you'll see a "Username already exists" error.</div>
+      </div>
+
+      <h4>Edit a Teacher</h4>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Find the teacher</strong><p>Use the search bar to filter by name or username.</p></div></li>
+        <li><div class="step-body"><strong>Click the ✏️ pencil icon</strong><p>On the right side of their card.</p></div></li>
+        <li><div class="step-body"><strong>Update and Save</strong><p>You can change First Name, Surname, and Email.</p></div></li>
+      </ol>
+
+      <h4>Delete a Teacher</h4>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Click the 🗑️ trash icon</strong></div></li>
+        <li><div class="step-body"><strong>Confirm the dialog</strong></div></li>
+      </ol>
+      <div class="callout danger">
+        <span class="icon">🚨</span>
+        <div><strong>Cascade delete:</strong> Deleting a teacher permanently removes all their classes, attendance sessions, and attendance records.</div>
+      </div>
+
+      <!-- Students -->
+      <h3>🎓 Managing Students</h3>
+      <h4>Add a Student</h4>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Go to the Students tab</strong></div></li>
+        <li><div class="step-body"><strong>Click "Add Student"</strong></div></li>
+        <li><div class="step-body"><strong>Fill in the required fields</strong><p>LRN (exactly 12 digits), First Name, Surname. Sex, Birthday (yyyy-MM-dd), and Suffix are optional.</p></div></li>
+        <li><div class="step-body"><strong>Optionally create a login account</strong><p>Fill in the Username and Password fields at the bottom to give the student app access.</p></div></li>
+        <li><div class="step-body"><strong>Click Save</strong></div></li>
+      </ol>
+
+      <h4>Edit a Student</h4>
+      <p>Use the ✏️ pencil icon on the student's card. The LRN cannot be changed after creation.</p>
+
+      <h4>Delete a Student</h4>
+      <p>Use the 🗑️ trash icon. This also removes all enrollment and attendance records for that student.</p>
+
+      <!-- Classes -->
+      <h3>🏫 Managing Classes</h3>
+      <h4>Create a Class</h4>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Go to the Classes tab</strong></div></li>
+        <li><div class="step-body"><strong>Click "Add Class"</strong></div></li>
+        <li><div class="step-body"><strong>Fill in the form</strong><p>Class Name (required), Grade 1–12 (required), Section (optional), School Year, and assign a Teacher (required).</p></div></li>
+        <li><div class="step-body"><strong>Click Save</strong></div></li>
+      </ol>
+
+      <h4>Enroll Students into a Class</h4>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Click the 👥 people icon</strong><p>Or tap anywhere on a class card to open the class students dialog.</p></div></li>
+        <li><div class="step-body"><strong>Click the ➕ person-add icon</strong><p>Top-right of the dialog — this opens the search panel.</p></div></li>
+        <li><div class="step-body"><strong>Search for a student</strong><p>Type a name or LRN. Only students not yet enrolled are shown.</p></div></li>
+        <li><div class="step-body"><strong>Click "Enroll"</strong><p>The student is immediately added and the list refreshes.</p></div></li>
+      </ol>
+
+      <div class="callout tip">
+        <span class="icon">✅</span>
+        <div>If the class is empty, you'll see an "Add students" link in the empty state — tap it to jump straight to the search panel.</div>
+      </div>
+
+      <h4>Remove a Student from a Class</h4>
+      <p>In the class students dialog, click the 🚫 remove icon next to the student and confirm. This only removes the enrollment — the student record is not deleted.</p>
+    </section>
+
+    <!-- Teacher Tutorial -->
+    <section id="teacher">
+      <h2>👨‍🏫 Tutorial: Teacher App</h2>
+
+      <h3>Logging In</h3>
+      <p>Use the username and password created for you by the admin.</p>
+
+      <h3>Viewing Your Classes</h3>
+      <p>The home screen lists all your assigned classes showing grade, section, and student count.</p>
+
+      <h3>Opening an Attendance Session</h3>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Tap a class</strong></div></li>
+        <li><div class="step-body"><strong>Tap "Start Attendance"</strong><p>A session opens automatically for today's date. You can only have one session per class per day.</p></div></li>
+      </ol>
+
+      <h3>Scanning QR Codes</h3>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Inside an open session, tap "Scan QR"</strong></div></li>
+        <li><div class="step-body"><strong>Point camera at the student's QR code</strong></div></li>
+        <li><div class="step-body"><strong>Confirmation appears</strong><p>Student is marked <strong>Present</strong> with time recorded.</p></div></li>
+      </ol>
+      <div class="callout warn">
+        <span class="icon">⚠️</span>
+        <div>QR codes have a <strong>30-second cooldown</strong>. Scanning the same student twice within 30 seconds will be rejected to prevent accidental duplicates.</div>
+      </div>
+
+      <h3>SF2 Attendance Report</h3>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Open a class</strong></div></li>
+        <li><div class="step-body"><strong>Tap "SF2 Report"</strong></div></li>
+        <li><div class="step-body"><strong>Select month and year</strong><p>The report shows a grid of all students vs. days in the month.</p></div></li>
+      </ol>
+    </section>
+
+    <!-- Student Tutorial -->
+    <section id="student">
+      <h2>🎓 Tutorial: Student App</h2>
+
+      <h3>Logging In</h3>
+      <p>Use the username and password assigned by your teacher or admin.</p>
+
+      <h3>Viewing Your Classes</h3>
+      <p>The home screen shows all classes you are currently enrolled in, including teacher name and grade level.</p>
+
+      <h3>Checking Your Attendance</h3>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Tap a class</strong></div></li>
+        <li><div class="step-body"><strong>View your attendance history</strong><p>Each session shows date, status (Present/Absent), and time marked.</p></div></li>
+      </ol>
+
+      <h3>Your QR Code</h3>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Go to Profile</strong></div></li>
+        <li><div class="step-body"><strong>Show your QR code to the teacher</strong><p>They will scan it to mark you present during an attendance session.</p></div></li>
+      </ol>
+    </section>
+
+    <!-- API Reference -->
+    <section id="api">
+      <h2>📡 API Reference</h2>
+      <p>Base URL: <code>https://your-backend.com</code> — All protected routes require <code>Authorization: Bearer &lt;token&gt;</code></p>
+
+      <h3>Auth</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="post">POST</span></td><td><code>/api/auth/login</code></td><td>Login for all roles</td></tr>
+          <tr><td><span class="post">POST</span></td><td><code>/api/auth/register</code></td><td>Register student with account</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Admin — Teachers</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="get">GET</span></td><td><code>/api/admin/teachers</code></td><td>List all teachers</td></tr>
+          <tr><td><span class="post">POST</span></td><td><code>/api/admin/teachers</code></td><td>Create teacher + user account</td></tr>
+          <tr><td><span class="put">PUT</span></td><td><code>/api/admin/teachers/:id</code></td><td>Update teacher info</td></tr>
+          <tr><td><span class="delete">DELETE</span></td><td><code>/api/admin/teachers/:id</code></td><td>Delete teacher (cascade)</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Admin — Students</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="get">GET</span></td><td><code>/api/admin/students</code></td><td>List all students (supports <code>?search=</code>)</td></tr>
+          <tr><td><span class="post">POST</span></td><td><code>/api/admin/students</code></td><td>Create student record</td></tr>
+          <tr><td><span class="put">PUT</span></td><td><code>/api/admin/students/:lrn</code></td><td>Update student info</td></tr>
+          <tr><td><span class="delete">DELETE</span></td><td><code>/api/admin/students/:lrn</code></td><td>Delete student (cascade)</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Admin — Classes</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="get">GET</span></td><td><code>/api/admin/classes</code></td><td>List all classes</td></tr>
+          <tr><td><span class="post">POST</span></td><td><code>/api/admin/classes</code></td><td>Create class</td></tr>
+          <tr><td><span class="put">PUT</span></td><td><code>/api/admin/classes/:id</code></td><td>Update class info</td></tr>
+          <tr><td><span class="delete">DELETE</span></td><td><code>/api/admin/classes/:id</code></td><td>Delete class (cascade)</td></tr>
+          <tr><td><span class="get">GET</span></td><td><code>/api/admin/classes/:id/students</code></td><td>List enrolled students</td></tr>
+          <tr><td><span class="post">POST</span></td><td><code>/api/admin/classes/:id/students</code></td><td>Enroll a student</td></tr>
+          <tr><td><span class="delete">DELETE</span></td><td><code>/api/admin/classes/:id/students/:lrn</code></td><td>Remove student from class</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Teacher</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="get">GET</span></td><td><code>/api/teacher/classes</code></td><td>My classes</td></tr>
+          <tr><td><span class="post">POST</span></td><td><code>/api/teacher/record-scan</code></td><td>Mark attendance via QR</td></tr>
+          <tr><td><span class="get">GET</span></td><td><code>/api/teacher/classes/:id/students</code></td><td>Class student list</td></tr>
+          <tr><td><span class="get">GET</span></td><td><code>/api/teacher/classes/:id/sf2-attendance</code></td><td>SF2 report data</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Student</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><span class="get">GET</span></td><td><code>/api/student/profile</code></td><td>My profile</td></tr>
+          <tr><td><span class="get">GET</span></td><td><code>/api/student/classes</code></td><td>My enrolled classes</td></tr>
+          <tr><td><span class="get">GET</span></td><td><code>/api/student/attendance</code></td><td>My attendance records</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Deployment -->
+    <section id="deployment">
+      <h2>🌐 Deployment</h2>
+
+      <h3>Backend (Render / Railway)</h3>
+      <ol class="steps">
+        <li><div class="step-body"><strong>Push your backend folder to GitHub</strong></div></li>
+        <li><div class="step-body"><strong>Create a new Web Service</strong><p>Point it at your repo and set Start Command to <code>npm start</code></p></div></li>
+        <li><div class="step-body"><strong>Add environment variables</strong><p><code>DB_HOST</code>, <code>DB_USER</code>, <code>DB_PASSWORD</code>, <code>DB_NAME</code>, <code>JWT_SECRET</code>, <code>PORT</code></p></div></li>
+      </ol>
+
+      <h3>Flutter Web (GitHub Pages)</h3>
+      <pre><code><span class="cm"># Build the web release</span>
+flutter build web --release
+
+<span class="cm"># Deploy build/web/ to gh-pages branch</span>
+git subtree push --prefix build/web origin gh-pages</code></pre>
+
+      <h3>Flutter Web (Netlify / Vercel)</h3>
+      <pre><code><span class="cm"># Build command</span>
+flutter build web --release
+
+<span class="cm"># Publish directory</span>
+build/web</code></pre>
+
+      <div class="callout tip">
+        <span class="icon">✅</span>
+        <div>After deploying the backend, update <code>api_config.dart</code> with the production URL and rebuild the Flutter app.</div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Mobile bottom nav -->
+<nav class="mobile-nav">
+  <div class="mobile-nav-links">
+    <a href="#overview" class="active"><span class="mn-icon">🧭</span>Overview</a>
+    <a href="#download"><span class="mn-icon">⬇️</span>Download</a>
+    <a href="#admin"><span class="mn-icon">🛡️</span>Admin</a>
+    <a href="#teacher"><span class="mn-icon">👨‍🏫</span>Teacher</a>
+    <a href="#api"><span class="mn-icon">📡</span>API</a>
+  </div>
+</nav>
+
+<script>
+  // Highlight active sidebar link on scroll
+  const links = document.querySelectorAll('.nav-link, .mobile-nav-links a');
+  const sections = document.querySelectorAll('section[id], div[id]');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = entry.target.id;
+        links.forEach(l => {
+          l.classList.toggle('active', l.getAttribute('href') === '#' + id);
+        });
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+
+</body>
+</html>
