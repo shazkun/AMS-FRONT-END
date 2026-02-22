@@ -30,6 +30,7 @@ class ApiConfig {
 
   // ── Student ───────────────────────────────────────────────────────────
   static String get studentProfile => '$baseUrl/api/student/profile';
+  static String get studentUpdateProfile => '$baseUrl/api/student/profile';
   static String get studentClasses => '$baseUrl/api/student/classes';
   static String get studentAttendance => '$baseUrl/api/student/attendance';
 
@@ -39,47 +40,26 @@ class ApiConfig {
   static String get adminClasses => '$baseUrl/api/admin/classes';
 
   // ── Admin — Teacher CRUD ──────────────────────────────────────────────
-  /// POST   → create teacher
-  /// (use adminTeachers for POST)
-
-  /// PUT /api/admin/teachers/:id
   static String adminUpdateTeacher(String teacherId) =>
       '$baseUrl/api/admin/teachers/$teacherId';
-
-  /// DELETE /api/admin/teachers/:id
   static String adminDeleteTeacher(String teacherId) =>
       '$baseUrl/api/admin/teachers/$teacherId';
-
-  /// GET  /api/admin/teachers/:id/classes
   static String adminTeacherClasses(String teacherId) =>
       '$baseUrl/api/admin/teachers/$teacherId/classes';
 
-  /// POST /api/admin/teachers/:id/classes  → create class for teacher
-  // (same URL as adminTeacherClasses, different method)
-
   // ── Admin — Student CRUD ──────────────────────────────────────────────
-  /// PUT /api/admin/students/:lrn
   static String adminUpdateStudent(String lrn) =>
       '$baseUrl/api/admin/students/$lrn';
-
-  /// DELETE /api/admin/students/:lrn
   static String adminDeleteStudent(String lrn) =>
       '$baseUrl/api/admin/students/$lrn';
 
   // ── Admin — Class CRUD ────────────────────────────────────────────────
-  /// PUT /api/admin/classes/:id
   static String adminUpdateClass(String classId) =>
       '$baseUrl/api/admin/classes/$classId';
-
-  /// DELETE /api/admin/classes/:id
   static String adminDeleteClass(String classId) =>
       '$baseUrl/api/admin/classes/$classId';
-
-  /// GET /api/admin/classes/:classId/students
   static String adminClassStudents(String classId) =>
       '$baseUrl/api/admin/classes/$classId/students';
-
-  /// DELETE /api/admin/classes/:classId/students/:lrn
   static String adminRemoveStudentFromClass(String classId, String lrn) =>
       '$baseUrl/api/admin/classes/$classId/students/$lrn';
 

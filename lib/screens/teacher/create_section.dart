@@ -250,7 +250,7 @@ class _CreateSectionScreenState extends State<CreateSectionScreen> {
                           ],
                         ),
 
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 20),
 
                         _mobileCard(
                           children: [
@@ -311,7 +311,7 @@ class _CreateSectionScreenState extends State<CreateSectionScreen> {
                           ],
                         ),
 
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 20),
 
                         _mobileCard(
                           children: [

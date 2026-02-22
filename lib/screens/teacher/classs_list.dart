@@ -1,30 +1,31 @@
 import 'dart:convert';
-
-import 'package:attsys/config/api_config.dart';
-import 'package:flutter/foundation.dart';
+import 'package:attsys/screens/teacher/qr_scan.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:excel/excel.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:intl/intl.dart';
-import 'package:file_picker/file_picker.dart';
+import '../../config/api_config.dart';
 
-// ── Conditional import: web uses dart:html, others use file I/O ──────────────
-import 'dltype/file_download_stub.dart'
-    if (dart.library.html) 'dltype/file_download_web.dart'
-    if (dart.library.io) 'dltype/file_download_mobile.dart';
+// ─────────────────────────────────────────────────────────────────────────────
+// Theme
+// ─────────────────────────────────────────────────────────────────────────────
+const _kBreakpoint = 720.0;
 
-import 'student_profile.dart';
+const _kGrad = LinearGradient(
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+  colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+);
+const _kAccent = Color(0xFF667eea);
+const _kPurple = Color(0xFF764ba2);
+const _kBg = Color(0xFFF0F2FA);
+const _kCard = Colors.white;
 
-import 'dart:typed_data';
-
+// ─────────────────────────────────────────────────────────────────────────────
+// ClassStudentsScreen — root
+// ─────────────────────────────────────────────────────────────────────────────
 class ClassStudentsScreen extends StatefulWidget {
   final String classId;
   final String className;
-
   const ClassStudentsScreen({
     super.key,
     required this.classId,
@@ -38,20 +39,15 @@ class ClassStudentsScreen extends StatefulWidget {
 class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
   List<dynamic> students = [];
   bool isLoading = true;
-  String? errorMessage;
-  bool isExporting = false;
-  bool isImporting = false;
+  String _search = '';
 
-  final TextEditingController _lrnController = TextEditingController();
-  final TextEditingController _schoolIdController = TextEditingController(
-    text: '',
-  );
-  final TextEditingController _schoolYearController = TextEditingController(
-    text: '',
-  );
-  final TextEditingController _schoolNameController = TextEditingController(
-    text: '',
-  );
+  // summary stats
+  int get totalStudents => students.length;
+  int get presentToday =>
+      students.where((s) => s['last_status'] == 'Present').length;
+  int get absentToday =>
+      students.where((s) => s['last_status'] == 'Absent').length;
+  int get lateToday => students.where((s) => s['last_status'] == 'Late').length;
 
   @override
   void initState() {
@@ -65,11 +61,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
   }
 
   Future<void> _loadStudents() async {
-    setState(() {
-      isLoading = true;
-      errorMessage = null;
-    });
-
+    setState(() => isLoading = true);
     try {
       final token = await _getToken();
       final res = await http
@@ -78,1580 +70,1016 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
             headers: ApiConfig.headers(token),
           )
           .timeout(ApiConfig.timeout);
-
       if (res.statusCode == 200) {
         setState(() {
-          students = json.decode(res.body);
+          students = json.decode(res.body) as List;
           isLoading = false;
         });
       } else {
-        setState(() {
-          errorMessage = 'Failed to load students (${res.statusCode})';
-          isLoading = false;
-        });
+        _showSnack(
+          'Failed to load students: ${res.statusCode}',
+          success: false,
+        );
+        setState(() => isLoading = false);
       }
     } catch (e) {
-      setState(() {
-        errorMessage = 'Network error: $e';
-        isLoading = false;
-      });
+      _showSnack('Error: $e', success: false);
+      setState(() => isLoading = false);
     }
   }
 
-  Future<void> _addStudent() async {
-    final lrn = _lrnController.text.trim();
-    if (lrn.isEmpty || lrn.length != 12 || !RegExp(r'^\d{12}$').hasMatch(lrn)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter a valid 12-digit LRN'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
-      return;
-    }
-
-    try {
-      final token = await _getToken();
-      final res = await http
-          .post(
-            Uri.parse(ApiConfig.teacherClassStudents(widget.classId)),
-            headers: ApiConfig.headers(token),
-            body: json.encode({'lrn': lrn}),
-          )
-          .timeout(ApiConfig.timeout);
-
-      if (res.statusCode == 201) {
-        final data = json.decode(res.body);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${data['studentName']} added to class'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        _lrnController.clear();
-        _loadStudents();
-      } else {
-        final err = json.decode(res.body)['message'] ?? 'Failed to add';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(err), backgroundColor: Colors.redAccent),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
-      );
-    }
-  }
-
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-
-  List<int> _getSchoolDays({int? month, int? year}) {
-    final now = DateTime.now();
-    final m = month ?? now.month;
-    final y = year ?? now.year;
-    final daysInMonth = DateTime(y, m + 1, 0).day;
-    return [
-      for (int d = 1; d <= daysInMonth; d++)
-        if (DateTime(y, m, d).weekday <= 5) d,
-    ];
-  }
-
-  List<String> _getDayLabels(List<int> schoolDays, {int? month, int? year}) {
-    final now = DateTime.now();
-    final m = month ?? now.month;
-    final y = year ?? now.year;
-    const labels = ['M', 'T', 'W', 'TH', 'F'];
-    return schoolDays
-        .map((d) => labels[DateTime(y, m, d).weekday - 1])
-        .toList();
-  }
-
-  String _statusToCell(String? status) {
-    switch (status) {
-      case 'Present':
-        return '';
-      case 'Late':
-        return 'L';
-      case 'Absent':
-        return 'A';
-      case 'Excused':
-        return 'E';
-      default:
-        return '';
-    }
-  }
-
-  // ── Fetch SF2 attendance ─────────────────────────────────────────────────────
-
-  Future<Map<String, Map<int, String>>> _fetchSF2Attendance({
-    int? month,
-    int? year,
-  }) async {
-    final token = await _getToken();
-    final url = ApiConfig.teacherSF2Attendance(
-      widget.classId,
-      month: month,
-      year: year,
-    );
-    final res = await http
-        .get(Uri.parse(url), headers: ApiConfig.headers(token))
-        .timeout(ApiConfig.timeout);
-
-    if (res.statusCode != 200) {
-      throw Exception('Failed to fetch attendance data (${res.statusCode})');
-    }
-
-    final body = json.decode(res.body) as Map<String, dynamic>;
-    final studentsList = body['students'] as List<dynamic>;
-
-    final Map<String, Map<int, String>> result = {};
-    for (final s in studentsList) {
-      final lrn = s['lrn'] as String;
-      final rawAttendance = s['attendance'] as Map<String, dynamic>? ?? {};
-      result[lrn] = {
-        for (final e in rawAttendance.entries)
-          int.parse(e.key):
-              (e.value as Map<String, dynamic>)['status'] as String,
-      };
-    }
-    return result;
-  }
-
-  // ── Validate export fields ───────────────────────────────────────────────────
-
-  bool _validateExportFields() {
-    final schoolId = _schoolIdController.text.trim();
-    final schoolYear = _schoolYearController.text.trim();
-    final schoolName = _schoolNameController.text.trim();
-
-    if (students.isEmpty) {
-      _showSnackBar('No students to export', Colors.orange);
-      return false;
-    }
-    if (schoolId.isEmpty || schoolYear.isEmpty || schoolName.isEmpty) {
-      _showSnackBar('Please fill in School ID, Year and Name', Colors.orange);
-      return false;
-    }
-    return true;
-  }
-
-  void _showSnackBar(String message, Color color) {
+  void _showSnack(String msg, {bool success = true}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message), backgroundColor: color));
-  }
-
-  // ── Export to Excel ──────────────────────────────────────────────────────────
-
-  Future<void> _exportToExcel() async {
-    if (!_validateExportFields()) return;
-
-    final schoolId = _schoolIdController.text.trim();
-    final schoolYear = _schoolYearController.text.trim();
-    final schoolName = _schoolNameController.text.trim();
-
-    setState(() => isExporting = true);
-
-    try {
-      final now = DateTime.now();
-      final attendanceData = await _fetchSF2Attendance(
-        month: now.month,
-        year: now.year,
-      );
-
-      final schoolDays = _getSchoolDays();
-      const maxColumns = 20;
-      final displayDays =
-          schoolDays.length > maxColumns
-              ? schoolDays.sublist(0, maxColumns)
-              : schoolDays;
-      final displayDow = _getDayLabels(displayDays);
-
-      final excel = Excel.createExcel();
-      excel.rename('Sheet1', DateFormat('MMMM').format(now).toUpperCase());
-      final sheet = excel[DateFormat('MMMM').format(now).toUpperCase()];
-
-      // Title rows
-      sheet.merge(CellIndex.indexByString('A1'), CellIndex.indexByString('P1'));
-      var titleCell = sheet.cell(CellIndex.indexByString('A1'));
-      titleCell.value = TextCellValue(
-        'School Form 2 (SF2) Daily Attendance Report of Learners',
-      );
-      titleCell.cellStyle = CellStyle(
-        bold: true,
-        fontSize: 14,
-        horizontalAlign: HorizontalAlign.Center,
-      );
-
-      sheet.merge(CellIndex.indexByString('A2'), CellIndex.indexByString('P2'));
-      var subtitleCell = sheet.cell(CellIndex.indexByString('A2'));
-      subtitleCell.value = TextCellValue(
-        '(This replaces Form 1, Form 2 & STS Form 4 - Absenteeism and Dropout Profile)',
-      );
-      subtitleCell.cellStyle = CellStyle(
-        fontSize: 10,
-        horizontalAlign: HorizontalAlign.Center,
-      );
-
-      // School info rows
-      sheet.merge(CellIndex.indexByString('A3'), CellIndex.indexByString('B3'));
-      sheet.cell(CellIndex.indexByString('A3')).value = TextCellValue(
-        'School ID',
-      );
-      sheet.merge(CellIndex.indexByString('C3'), CellIndex.indexByString('F3'));
-      sheet.cell(CellIndex.indexByString('C3')).value = TextCellValue(schoolId);
-      sheet.merge(CellIndex.indexByString('G3'), CellIndex.indexByString('I3'));
-      sheet.cell(CellIndex.indexByString('G3')).value = TextCellValue(
-        'School Year',
-      );
-      sheet.merge(CellIndex.indexByString('J3'), CellIndex.indexByString('M3'));
-      sheet.cell(CellIndex.indexByString('J3')).value = TextCellValue(
-        schoolYear,
-      );
-
-      sheet.merge(CellIndex.indexByString('A4'), CellIndex.indexByString('B4'));
-      sheet.cell(CellIndex.indexByString('A4')).value = TextCellValue(
-        'Name of School',
-      );
-      sheet.merge(CellIndex.indexByString('C4'), CellIndex.indexByString('J4'));
-      sheet.cell(CellIndex.indexByString('C4')).value = TextCellValue(
-        schoolName,
-      );
-
-      sheet.merge(CellIndex.indexByString('A5'), CellIndex.indexByString('B5'));
-      sheet.cell(CellIndex.indexByString('A5')).value = TextCellValue(
-        'Grade/Section',
-      );
-      sheet.merge(CellIndex.indexByString('C5'), CellIndex.indexByString('J5'));
-      sheet.cell(CellIndex.indexByString('C5')).value = TextCellValue(
-        widget.className,
-      );
-
-      sheet.merge(CellIndex.indexByString('K5'), CellIndex.indexByString('L5'));
-      sheet.cell(CellIndex.indexByString('K5')).value = TextCellValue('Month');
-      sheet.merge(CellIndex.indexByString('M5'), CellIndex.indexByString('P5'));
-      sheet.cell(CellIndex.indexByString('M5')).value = TextCellValue(
-        DateFormat('MMMM yyyy').format(now),
-      );
-
-      // Column headers
-      final int dayColStart = 4;
-
-      sheet.merge(CellIndex.indexByString('A6'), CellIndex.indexByString('B6'));
-      _headerCell(sheet, 'A6', 'No.');
-      _headerCell(sheet, 'C6', 'NAME\n(Last Name, First Name, Middle Name)');
-      _headerCell(sheet, 'D6', 'SEX');
-
-      for (int i = 0; i < displayDays.length; i++) {
-        final colIdx = dayColStart + i;
-        final dayCell = sheet.cell(
-          CellIndex.indexByColumnRow(columnIndex: colIdx, rowIndex: 5),
-        );
-        dayCell.value = IntCellValue(displayDays[i]);
-        dayCell.cellStyle = CellStyle(
-          bold: true,
-          horizontalAlign: HorizontalAlign.Center,
-        );
-        final dowCell = sheet.cell(
-          CellIndex.indexByColumnRow(columnIndex: colIdx, rowIndex: 6),
-        );
-        dowCell.value = TextCellValue(displayDow[i]);
-        dowCell.cellStyle = CellStyle(
-          bold: true,
-          horizontalAlign: HorizontalAlign.Center,
-        );
-      }
-
-      // Student rows
-      for (int i = 0; i < students.length; i++) {
-        final student = students[i];
-        final lrn = student['lrn'] as String;
-        final rowIndex = i + 7;
-
-        sheet.merge(
-          CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex),
-          CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: rowIndex),
-        );
-        sheet
-            .cell(
-              CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex),
-            )
-            .value = IntCellValue(i + 1);
-
-        final name = '${student['surname'].toString().toUpperCase()}, '
-                '${student['firstname'].toString().toUpperCase()} '
-                '${student['middlename']?.toString().toUpperCase() ?? ''} '
-                '${student['suffix'] ?? ''}'
-            .trim()
-            .replaceAll(RegExp(r' +'), ' ');
-        sheet
-            .cell(
-              CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: rowIndex),
-            )
-            .value = TextCellValue(name);
-
-        final sexVal = student['sex'] as String? ?? '';
-        sheet
-            .cell(
-              CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: rowIndex),
-            )
-            .value = TextCellValue(sexVal);
-
-        final studentAttendance = attendanceData[lrn] ?? {};
-        for (int j = 0; j < displayDays.length; j++) {
-          final dayNum = displayDays[j];
-          final colIdx = dayColStart + j;
-          final status = studentAttendance[dayNum];
-          sheet
-              .cell(
-                CellIndex.indexByColumnRow(
-                  columnIndex: colIdx,
-                  rowIndex: rowIndex,
-                ),
-              )
-              .value = TextCellValue(_statusToCell(status));
-        }
-      }
-
-      // Footer
-      final footerRow = students.length + 8;
-      sheet.merge(
-        CellIndex.indexByString('A$footerRow'),
-        CellIndex.indexByString('D$footerRow'),
-      );
-      sheet.cell(CellIndex.indexByString('A$footerRow')).value = TextCellValue(
-        'Total School Days: ${displayDays.length}',
-      );
-
-      // Column widths
-      sheet.setColumnWidth(0, 5);
-      sheet.setColumnWidth(1, 5);
-      sheet.setColumnWidth(2, 35);
-      sheet.setColumnWidth(3, 8);
-      for (int i = dayColStart; i < dayColStart + displayDays.length; i++) {
-        sheet.setColumnWidth(i, 6);
-      }
-
-      // Legend
-      final legendRow = students.length + 10;
-      sheet.cell(CellIndex.indexByString('A$legendRow')).value = TextCellValue(
-        'Legend: blank = Present, L = Late, A = Absent, E = Excused',
-      );
-
-      // Save bytes
-      final fileBytes = excel.save();
-      if (fileBytes == null || fileBytes.isEmpty) {
-        throw Exception('Excel save returned null or empty bytes');
-      }
-
-      final fileName =
-          'SF2_${widget.className}_${DateFormat('yyyy-MM').format(now)}.xlsx';
-
-      // ── Download ────────────────────────────────────────────────────────────
-      // downloadFile handles the platform difference (web vs mobile/desktop).
-      // On web: triggers browser download. On mobile/desktop: saves & opens file.
-      await downloadFile(
-        Uint8List.fromList(fileBytes),
-        fileName,
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      );
-
-      // Only show success after download completes without error
-      if (mounted) {
-        setState(() => isExporting = false);
-        _showSnackBar('Excel downloaded: $fileName', Colors.green);
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => isExporting = false);
-        _showSnackBar('Export failed: $e', Colors.red);
-      }
-    }
-  }
-
-  void _headerCell(Sheet sheet, String address, String text) {
-    final cell = sheet.cell(CellIndex.indexByString(address));
-    cell.value = TextCellValue(text);
-    cell.cellStyle = CellStyle(
-      bold: true,
-      horizontalAlign: HorizontalAlign.Center,
-    );
-  }
-
-  // ── Export to PDF ────────────────────────────────────────────────────────────
-
-  Future<void> _exportToPDF() async {
-    if (!_validateExportFields()) return;
-
-    final schoolId = _schoolIdController.text.trim();
-    final schoolYear = _schoolYearController.text.trim();
-    final schoolName = _schoolNameController.text.trim();
-
-    setState(() => isExporting = true);
-
-    try {
-      final now = DateTime.now();
-      final attendanceData = await _fetchSF2Attendance(
-        month: now.month,
-        year: now.year,
-      );
-
-      final schoolDays = _getSchoolDays();
-      const maxColumns = 20;
-      final displayDays =
-          schoolDays.length > maxColumns
-              ? schoolDays.sublist(0, maxColumns)
-              : schoolDays;
-      final displayDow = _getDayLabels(displayDays);
-      final numDayColumns = displayDays.length;
-
-      final pdf = pw.Document();
-
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.legal.landscape,
-          margin: const pw.EdgeInsets.all(20),
-          build: (pw.Context context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Center(
-                  child: pw.Text(
-                    'School Form 2 (SF2) Daily Attendance Report of Learners',
-                    style: pw.TextStyle(
-                      fontSize: 14,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                ),
-                pw.SizedBox(height: 4),
-                pw.Center(
-                  child: pw.Text(
-                    '(This replaces Form 1, Form 2 & STS Form 4 - Absenteeism and Dropout Profile)',
-                    style: const pw.TextStyle(fontSize: 9),
-                  ),
-                ),
-                pw.SizedBox(height: 8),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      'School ID: $schoolId',
-                      style: const pw.TextStyle(fontSize: 10),
-                    ),
-                    pw.Text(
-                      'School Year: $schoolYear',
-                      style: const pw.TextStyle(fontSize: 10),
-                    ),
-                    pw.Text(
-                      'Month: ${DateFormat('MMMM yyyy').format(now)}',
-                      style: const pw.TextStyle(fontSize: 10),
-                    ),
-                  ],
-                ),
-                pw.Text(
-                  'Name of School: $schoolName',
-                  style: const pw.TextStyle(fontSize: 10),
-                ),
-                pw.Text(
-                  'Grade/Section: ${widget.className}',
-                  style: pw.TextStyle(
-                    fontSize: 10,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 8),
-                pw.Table(
-                  border: pw.TableBorder.all(width: 0.5),
-                  columnWidths: {
-                    0: const pw.FixedColumnWidth(25),
-                    1: const pw.FixedColumnWidth(175),
-                    2: const pw.FixedColumnWidth(25),
-                    ...{
-                      for (int i = 0; i < numDayColumns; i++)
-                        i + 3: const pw.FixedColumnWidth(20),
-                    },
-                  },
-                  children: [
-                    // Header row 1: labels
-                    pw.TableRow(
-                      decoration: const pw.BoxDecoration(
-                        color: PdfColors.grey200,
-                      ),
-                      children: [
-                        _pdfHeaderCell('No.'),
-                        _pdfHeaderCell('NAME'),
-                        _pdfHeaderCell('SEX'),
-                        ...List.generate(
-                          numDayColumns,
-                          (i) => _pdfHeaderCell('${displayDays[i]}'),
-                        ),
-                      ],
-                    ),
-                    // Header row 2: day-of-week
-                    pw.TableRow(
-                      decoration: const pw.BoxDecoration(
-                        color: PdfColors.grey100,
-                      ),
-                      children: [
-                        pw.Container(),
-                        pw.Container(),
-                        pw.Container(),
-                        ...List.generate(
-                          numDayColumns,
-                          (i) => pw.Padding(
-                            padding: const pw.EdgeInsets.all(2),
-                            child: pw.Center(
-                              child: pw.Text(
-                                displayDow[i],
-                                style: const pw.TextStyle(fontSize: 6),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    // Student rows
-                    ...students.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final student = entry.value;
-                      final lrn = student['lrn'] as String;
-                      final name = '${student['surname'].toString().toUpperCase()}, '
-                              '${student['firstname'].toString().toUpperCase()} '
-                              '${student['middlename']?.toString().toUpperCase() ?? ''} '
-                              '${student['suffix'] ?? ''}'
-                          .trim()
-                          .replaceAll(RegExp(r' +'), ' ');
-                      final sex = student['sex'] as String? ?? '';
-                      final studentAttendance = attendanceData[lrn] ?? {};
-
-                      return pw.TableRow(
-                        children: [
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(2),
-                            child: pw.Center(
-                              child: pw.Text(
-                                '${index + 1}',
-                                style: const pw.TextStyle(fontSize: 7),
-                              ),
-                            ),
-                          ),
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(2),
-                            child: pw.Text(
-                              name,
-                              style: const pw.TextStyle(fontSize: 7),
-                            ),
-                          ),
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(2),
-                            child: pw.Center(
-                              child: pw.Text(
-                                sex,
-                                style: const pw.TextStyle(fontSize: 7),
-                              ),
-                            ),
-                          ),
-                          ...List.generate(numDayColumns, (i) {
-                            final dayNum = displayDays[i];
-                            final status = studentAttendance[dayNum];
-                            final cellText = _statusToCell(status);
-                            final isAbsent = cellText == 'A';
-                            return pw.Container(
-                              height: 14,
-                              alignment: pw.Alignment.center,
-                              color: isAbsent ? PdfColors.red100 : null,
-                              child: pw.Text(
-                                cellText,
-                                style: pw.TextStyle(
-                                  fontSize: 7,
-                                  color:
-                                      isAbsent
-                                          ? PdfColors.red
-                                          : PdfColors.black,
-                                ),
-                              ),
-                            );
-                          }),
-                        ],
-                      );
-                    }),
-                  ],
-                ),
-                pw.SizedBox(height: 8),
-                pw.Text(
-                  'Total School Days: $numDayColumns   |   Legend: blank = Present, L = Late, A = Absent, E = Excused',
-                  style: const pw.TextStyle(fontSize: 8),
-                ),
-              ],
-            );
-          },
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              success ? Icons.check_circle_outline : Icons.error_outline,
+              color: Colors.white,
+              size: 18,
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Text(msg)),
+          ],
         ),
-      );
-
-      final pdfBytes = await pdf.save();
-      final fileName =
-          'SF2_${widget.className}_${DateFormat('yyyy-MM').format(now)}.pdf';
-
-      // ── Download ────────────────────────────────────────────────────────────
-      // downloadFile handles web (dart:html blob download) and mobile/desktop.
-      await downloadFile(pdfBytes, fileName, 'application/pdf');
-
-      // Only show success after download completes without error
-      if (mounted) {
-        setState(() => isExporting = false);
-        _showSnackBar('PDF downloaded: $fileName', Colors.green);
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => isExporting = false);
-        _showSnackBar('Export failed: $e', Colors.red);
-      }
-    }
-  }
-
-  pw.Widget _pdfHeaderCell(String text) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.all(2),
-      child: pw.Center(
-        child: pw.Text(
-          text,
-          style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
-        ),
+        backgroundColor: success ? Colors.green : Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
       ),
     );
   }
 
-  // ── CSV / XLSX Import ────────────────────────────────────────────────────────
-
-  List<List<String>> _parseCsv(String content) {
-    final rows = <List<String>>[];
-    for (final line in content.split(RegExp(r'\r?\n'))) {
-      if (line.trim().isEmpty) continue;
-      final cells = <String>[];
-      bool inQuotes = false;
-      final buf = StringBuffer();
-      for (int i = 0; i < line.length; i++) {
-        final ch = line[i];
-        if (ch == '"') {
-          if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
-            buf.write('"');
-            i++;
-          } else {
-            inQuotes = !inQuotes;
-          }
-        } else if (ch == ',' && !inQuotes) {
-          cells.add(buf.toString().trim());
-          buf.clear();
-        } else {
-          buf.write(ch);
-        }
-      }
-      cells.add(buf.toString().trim());
-      rows.add(cells);
-    }
-    return rows;
+  List<dynamic> get _filtered {
+    if (_search.isEmpty) return students;
+    final q = _search.toLowerCase();
+    return students.where((s) {
+      final name =
+          '${s['firstname'] ?? ''} ${s['suffix'] ?? ''} ${s['surname'] ?? ''}'
+              .toLowerCase();
+      final lrn = (s['lrn'] ?? '').toString().toLowerCase();
+      return name.contains(q) || lrn.contains(q);
+    }).toList();
   }
 
-  int _colIndex(List<String> headers, String header) =>
-      headers.indexWhere((h) => h.toLowerCase() == header.toLowerCase());
-
-  Future<void> _downloadImportTemplate() async {
-    const content =
-        'lrn,firstname,surname,suffix,middlename,birthday,sex\n'
-        '123456789012,Juan,Dela Cruz,,Santos,2010-05-15,Male\n'
-        '123456789013,Maria,Reyes,Jr.,Lopez,2011-03-22,Female\n';
-
-    await downloadFile(
-      Uint8List.fromList(content.codeUnits),
-      'student_import_template.csv',
-      'text/csv',
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (ctx, constraints) {
+        final isDesktop = constraints.maxWidth >= _kBreakpoint;
+        return isDesktop ? _buildDesktopLayout() : _buildMobileLayout();
+      },
     );
   }
 
-  Future<void> _importStudents() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['csv', 'xlsx', 'xls'],
-      withData: true,
-    );
-
-    if (result == null || result.files.isEmpty) return;
-
-    final file = result.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) return;
-
-    final ext = (file.extension ?? '').toLowerCase();
-
-    List<Map<String, String>> rows = [];
-    try {
-      if (ext == 'csv') {
-        rows = _parseCsvBytes(bytes);
-      } else {
-        rows = _parseXlsxBytes(bytes);
-      }
-    } catch (e) {
-      if (mounted) {
-        _showSnackBar('Failed to parse file: $e', Colors.redAccent);
-      }
-      return;
-    }
-
-    if (rows.isEmpty) {
-      if (mounted) {
-        _showSnackBar('No valid rows found in file', Colors.orange);
-      }
-      return;
-    }
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            title: const Text('Import Students'),
-            content: Text(
-              'Found ${rows.length} student${rows.length != 1 ? 's' : ''} in the file.\n\n'
-              'Students already registered will be enrolled by LRN.\n'
-              'Unregistered LRNs will be skipped.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF667eea),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+  // ═══════════════════════════════════════════════════════════════════════════
+  // DESKTOP LAYOUT
+  // ═══════════════════════════════════════════════════════════════════════════
+  Widget _buildDesktopLayout() {
+    return Scaffold(
+      backgroundColor: _kBg,
+      body: Row(
+        children: [
+          // ── Left info panel ────────────────────────────────────────────────
+          Container(
+            width: 240,
+            decoration: const BoxDecoration(
+              gradient: _kGrad,
+              boxShadow: [
+                BoxShadow(
+                  color: Color(0x33000000),
+                  blurRadius: 20,
+                  offset: Offset(4, 0),
                 ),
-                child: const Text('Import'),
-              ),
-            ],
-          ),
-    );
-
-    if (confirmed != true) return;
-
-    setState(() => isImporting = true);
-
-    int success = 0, skipped = 0;
-    final List<String> errors = [];
-
-    for (final row in rows) {
-      final lrn = row['lrn'] ?? '';
-      if (lrn.isEmpty ||
-          lrn.length != 12 ||
-          !RegExp(r'^\d{12}$').hasMatch(lrn)) {
-        errors.add('Invalid LRN: "$lrn"');
-        continue;
-      }
-
-      try {
-        final token = await _getToken();
-        final res = await http
-            .post(
-              Uri.parse(ApiConfig.teacherClassStudents(widget.classId)),
-              headers: ApiConfig.headers(token),
-              body: json.encode({'lrn': lrn}),
-            )
-            .timeout(ApiConfig.timeout);
-
-        if (res.statusCode == 201) {
-          success++;
-        } else if (res.statusCode == 409) {
-          skipped++;
-        } else {
-          final msg = json.decode(res.body)['message'] ?? 'Error';
-          errors.add('LRN $lrn: $msg');
-        }
-      } catch (e) {
-        errors.add('LRN $lrn: network error');
-      }
-    }
-
-    setState(() => isImporting = false);
-    _loadStudents();
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
+              ],
             ),
-            title: const Text('Import Complete'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _importResultRow(
-                  Icons.check_circle,
-                  Colors.green,
-                  '$success student${success != 1 ? 's' : ''} enrolled',
-                ),
-                if (skipped > 0)
-                  _importResultRow(
-                    Icons.info,
-                    Colors.orange,
-                    '$skipped already enrolled (skipped)',
-                  ),
-                if (errors.isNotEmpty) ...[
-                  _importResultRow(
-                    Icons.error,
-                    Colors.red,
-                    '${errors.length} failed',
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    constraints: const BoxConstraints(maxHeight: 120),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(8),
+            child: SafeArea(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Back + class name header
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        InkWell(
+                          onTap: () => Navigator.pop(context),
+                          borderRadius: BorderRadius.circular(10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 7,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.arrow_back_rounded,
+                                  color: Colors.white,
+                                  size: 16,
+                                ),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Back',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.18),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.people_rounded,
+                            color: Colors.white,
+                            size: 26,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          widget.className,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 20,
+                            letterSpacing: -0.5,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const Text(
+                          'Class Roster',
+                          style: TextStyle(color: Colors.white60, fontSize: 12),
+                        ),
+                      ],
                     ),
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(8),
-                      child: Text(
-                        errors.join('\n'),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.red.shade800,
-                          fontFamily: 'monospace',
+                  ),
+
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Divider(
+                      color: Colors.white.withOpacity(0.2),
+                      height: 20,
+                    ),
+                  ),
+
+                  // Stat cards
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Column(
+                      children: [
+                        _RailStat(
+                          icon: Icons.people_rounded,
+                          label: 'Total Students',
+                          value: '$totalStudents',
+                          loading: isLoading,
+                        ),
+                        const SizedBox(height: 6),
+                        _RailStat(
+                          icon: Icons.check_circle_rounded,
+                          label: 'Present Today',
+                          value: '$presentToday',
+                          loading: isLoading,
+                          valueColor: Colors.greenAccent.shade200,
+                        ),
+                        const SizedBox(height: 6),
+                        _RailStat(
+                          icon: Icons.cancel_rounded,
+                          label: 'Absent Today',
+                          value: '$absentToday',
+                          loading: isLoading,
+                          valueColor: Colors.redAccent.shade100,
+                        ),
+                        const SizedBox(height: 6),
+                        _RailStat(
+                          icon: Icons.access_time_rounded,
+                          label: 'Late Today',
+                          value: '$lateToday',
+                          loading: isLoading,
+                          valueColor: Colors.orangeAccent.shade200,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const Spacer(),
+
+                  // Refresh
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+                    child: InkWell(
+                      onTap: _loadStudents,
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(
+                              Icons.refresh_rounded,
+                              color: Colors.white,
+                              size: 17,
+                            ),
+                            SizedBox(width: 10),
+                            Text(
+                              'Refresh',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ),
                 ],
-              ],
-            ),
-            actions: [
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF667eea),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text('Done'),
               ),
-            ],
+            ),
           ),
-    );
-  }
 
-  Widget _importResultRow(IconData icon, Color color, String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 10),
-          Expanded(child: Text(text, style: const TextStyle(fontSize: 14))),
-        ],
-      ),
-    );
-  }
-
-  List<Map<String, String>> _parseCsvBytes(Uint8List bytes) {
-    final content = utf8.decode(bytes, allowMalformed: true);
-    final allRows = _parseCsv(content);
-    if (allRows.isEmpty) return [];
-
-    final headers = allRows.first.map((h) => h.trim()).toList();
-    final lrnIdx = _colIndex(headers, 'lrn');
-    final firstIdx = _colIndex(headers, 'firstname');
-    final surnameIdx = _colIndex(headers, 'surname');
-    final suffixIdx = _colIndex(headers, 'suffix');
-    final middleIdx = _colIndex(headers, 'middlename');
-    final birthdayIdx = _colIndex(headers, 'birthday');
-    final sexIdx = _colIndex(headers, 'sex');
-
-    if (lrnIdx == -1) throw Exception('Missing "lrn" column');
-
-    return allRows.skip(1).where((r) => r.isNotEmpty).map((row) {
-      String cell(int idx) => idx >= 0 && idx < row.length ? row[idx] : '';
-      return {
-        'lrn': cell(lrnIdx),
-        'firstname': cell(firstIdx),
-        'surname': cell(surnameIdx),
-        'suffix': cell(suffixIdx),
-        'middlename': cell(middleIdx),
-        'birthday': cell(birthdayIdx),
-        'sex': cell(sexIdx),
-      };
-    }).toList();
-  }
-
-  List<Map<String, String>> _parseXlsxBytes(Uint8List bytes) {
-    final excel = Excel.decodeBytes(bytes);
-    Sheet? sheet;
-    for (final name in excel.tables.keys) {
-      final s = excel.tables[name];
-      if (s != null && s.rows.isNotEmpty) {
-        sheet = s;
-        break;
-      }
-    }
-    if (sheet == null) throw Exception('No sheet found in file');
-
-    final rows = sheet.rows;
-    if (rows.isEmpty) return [];
-
-    final headers =
-        rows.first
-            .map((c) => (c?.value?.toString() ?? '').trim().toLowerCase())
-            .toList();
-    final lrnIdx = headers.indexOf('lrn');
-    final firstIdx = headers.indexOf('firstname');
-    final surnameIdx = headers.indexOf('surname');
-    final suffixIdx = headers.indexOf('suffix');
-    final birthdayIdx = headers.indexOf('birthday');
-    final sexIdx = headers.indexOf('sex');
-
-    if (lrnIdx == -1) throw Exception('Missing "lrn" column');
-
-    String cellVal(List<Data?> row, int idx) {
-      if (idx < 0 || idx >= row.length) return '';
-      final v = row[idx]?.value;
-      if (v == null) return '';
-      if (v is DateTime) return DateFormat('yyyy-MM-dd').format(v as DateTime);
-      return v.toString().trim();
-    }
-
-    return rows
-        .skip(1)
-        .where((r) => r.isNotEmpty)
-        .map(
-          (row) => {
-            'lrn': cellVal(row, lrnIdx),
-            'firstname': cellVal(row, firstIdx),
-            'surname': cellVal(row, surnameIdx),
-            'suffix': cellVal(row, suffixIdx),
-            'birthday': cellVal(row, birthdayIdx),
-            'sex': cellVal(row, sexIdx),
-          },
-        )
-        .where((r) => r['lrn']!.isNotEmpty)
-        .toList();
-  }
-
-  // ── Export options sheet ─────────────────────────────────────────────────────
-
-  void _showExportOptions() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder:
-          (context) => Container(
-            padding: const EdgeInsets.all(24),
+          // ── Content area ───────────────────────────────────────────────────
+          Expanded(
             child: Column(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                  'Export SF2 Format',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Choose export format for ${students.length} students',
-                  style: TextStyle(color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 24),
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      Icons.table_chart,
-                      color: Colors.green.shade700,
-                    ),
+                // Top bar with search
+                Container(
+                  height: 60,
+                  color: _kCard,
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Row(
+                    children: [
+                      const Text(
+                        'Student Roster',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1a1a2e),
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      const SizedBox(width: 24),
+                      Expanded(
+                        child: TextField(
+                          onChanged: (v) => setState(() => _search = v),
+                          decoration: InputDecoration(
+                            hintText: 'Search by name or LRN…',
+                            prefixIcon: const Icon(
+                              Icons.search,
+                              color: _kAccent,
+                              size: 18,
+                            ),
+                            filled: true,
+                            fillColor: Colors.grey.shade50,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide.none,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(
+                                color: Colors.grey.shade200,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: const BorderSide(
+                                color: _kAccent,
+                                width: 1.5,
+                              ),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 10,
+                              horizontal: 14,
+                            ),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _kAccent.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          '${_filtered.length} student${_filtered.length != 1 ? 's' : ''}',
+                          style: const TextStyle(
+                            color: _kAccent,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  title: const Text('Export to Excel'),
-                  subtitle: const Text('Editable spreadsheet (.xlsx)'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _exportToExcel();
-                  },
                 ),
-                const SizedBox(height: 8),
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      Icons.picture_as_pdf,
-                      color: Colors.red.shade700,
-                    ),
-                  ),
-                  title: const Text('Export to PDF'),
-                  subtitle: const Text('Printable document (.pdf)'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _exportToPDF();
-                  },
-                ),
-                const Divider(height: 24),
-                ListTile(
-                  leading: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      Icons.download_for_offline_rounded,
-                      color: Colors.blue.shade700,
-                    ),
-                  ),
-                  title: const Text('Download Import Template'),
-                  subtitle: const Text('CSV template with correct columns'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _downloadImportTemplate();
-                  },
+                const Divider(height: 1, color: Color(0xFFE8EAF0)),
+                Expanded(
+                  child:
+                      isLoading
+                          ? const Center(
+                            child: CircularProgressIndicator(color: _kAccent),
+                          )
+                          : _filtered.isEmpty
+                          ? _buildDesktopEmptyState()
+                          : _buildDesktopGrid(),
                 ),
               ],
             ),
           ),
+        ],
+      ),
     );
   }
 
-  // ── Build ────────────────────────────────────────────────────────────────────
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        actions: [
-          IconButton(
-            icon:
-                isImporting
-                    ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                    : const Icon(Icons.upload_file_rounded),
-            tooltip: 'Import Students (CSV / XLSX)',
-            onPressed: isImporting ? null : _importStudents,
+  Widget _buildDesktopEmptyState() => Center(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: _kAccent.withOpacity(0.08),
+            shape: BoxShape.circle,
           ),
-          if (!isLoading && students.isNotEmpty)
-            IconButton(
-              icon:
-                  isExporting
-                      ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                      : const Icon(Icons.download_rounded),
-              tooltip: 'Export SF2',
-              onPressed: isExporting ? null : _showExportOptions,
-            ),
-        ],
-      ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+          child: const Icon(Icons.people_outline, size: 56, color: _kAccent),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          students.isEmpty
+              ? 'No students enrolled yet'
+              : 'No results for "$_search"',
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1a1a2e),
           ),
         ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 16, 12),
-                child: Row(
-                  children: [
-                    Column(
+        if (students.isEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Students will appear here once enrolled',
+            style: TextStyle(color: Colors.grey.shade500, fontSize: 14),
+          ),
+        ],
+      ],
+    ),
+  );
+
+  Widget _buildDesktopGrid() {
+    return RefreshIndicator(
+      onRefresh: _loadStudents,
+      color: _kAccent,
+      child: GridView.builder(
+        padding: const EdgeInsets.all(24),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 320,
+          childAspectRatio: 1.6,
+          crossAxisSpacing: 14,
+          mainAxisSpacing: 14,
+        ),
+        itemCount: _filtered.length,
+        itemBuilder: (_, i) => _DesktopStudentCard(student: _filtered[i]),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MOBILE LAYOUT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildMobileLayout() {
+    void openQRScanner(String classId, String className) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => QRScanScreen(classId: classId, className: className),
+        ),
+      );
+    }
+
+    return Scaffold(
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            expandedHeight: 180,
+            floating: false,
+            pinned: true,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+              onPressed: () => Navigator.pop(context),
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                onPressed: _loadStudents,
+              ),
+              IconButton(
+                icon: const Icon(Icons.scanner, color: Colors.white),
+                onPressed:
+                    () => openQRScanner(widget.classId, widget.className),
+              ),
+            ],
+            flexibleSpace: FlexibleSpaceBar(
+              background: Container(
+                decoration: const BoxDecoration(gradient: _kGrad),
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        const Text(
-                          'Class Students',
-                          style: TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
+                        const Row(
+                          children: [
+                            Icon(
+                              Icons.people_rounded,
+                              color: Colors.white,
+                              size: 28,
+                            ),
+                            SizedBox(width: 10),
+                            Text(
+                              'Class Roster',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
                         ),
+                        const SizedBox(height: 6),
                         Text(
                           widget.className,
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Colors.white.withOpacity(0.85),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: -0.5,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            _MobileStatBadge(
+                              icon: Icons.group_rounded,
+                              label: '$totalStudents total',
+                            ),
+                            const SizedBox(width: 8),
+                            _MobileStatBadge(
+                              icon: Icons.check_circle_rounded,
+                              label: '$presentToday present',
+                              color: Colors.greenAccent.shade200,
+                            ),
+                            const SizedBox(width: 8),
+                            _MobileStatBadge(
+                              icon: Icons.cancel_rounded,
+                              label: '$absentToday absent',
+                              color: Colors.redAccent.shade100,
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.refresh_rounded,
-                        color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Search bar
+          SliverToBoxAdapter(
+            child: Container(
+              color: _kCard,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: TextField(
+                onChanged: (v) => setState(() => _search = v),
+                decoration: InputDecoration(
+                  hintText: 'Search by name or LRN…',
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    color: _kAccent,
+                    size: 18,
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade200),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: _kAccent, width: 1.5),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    vertical: 11,
+                    horizontal: 14,
+                  ),
+                  isDense: true,
+                ),
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: const Divider(height: 1, color: Color(0xFFE8EAF0)),
+          ),
+
+          // Student list
+          if (isLoading)
+            const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator(color: _kAccent)),
+            )
+          else if (_filtered.isEmpty)
+            SliverFillRemaining(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      students.isEmpty
+                          ? Icons.person_off_rounded
+                          : Icons.search_off_rounded,
+                      size: 56,
+                      color: Colors.grey.shade300,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      students.isEmpty
+                          ? 'No students enrolled yet'
+                          : 'No results for "$_search"',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade600,
                       ),
-                      tooltip: 'Refresh',
-                      onPressed: _loadStudents,
                     ),
                   ],
                 ),
               ),
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: _loadStudents,
-                  color: const Color(0xFF667eea),
-                  backgroundColor: Colors.white,
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 80),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // School info + add student card
-                          Container(
-                            padding: const EdgeInsets.all(20),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.95),
-                              borderRadius: BorderRadius.circular(28),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.12),
-                                  blurRadius: 20,
-                                  offset: const Offset(0, 10),
-                                ),
-                              ],
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'School Information (for SF2 export)',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _buildTextField(
-                                        controller: _schoolIdController,
-                                        label: 'School ID',
-                                        keyboardType: TextInputType.number,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: _buildTextField(
-                                        controller: _schoolYearController,
-                                        label: 'School Year',
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                                _buildTextField(
-                                  controller: _schoolNameController,
-                                  label: 'School Name',
-                                ),
-                                const SizedBox(height: 24),
-                                const Divider(),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'Add Student',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: TextField(
-                                        controller: _lrnController,
-                                        decoration: InputDecoration(
-                                          labelText: 'Enter 12-digit LRN',
-                                          prefixIcon: const Icon(
-                                            Icons.badge_rounded,
-                                            color: Color(0xFF667eea),
-                                          ),
-                                          suffixIcon:
-                                              _lrnController.text.isNotEmpty
-                                                  ? IconButton(
-                                                    icon: const Icon(
-                                                      Icons.clear_rounded,
-                                                    ),
-                                                    onPressed: () {
-                                                      _lrnController.clear();
-                                                      setState(() {});
-                                                    },
-                                                  )
-                                                  : null,
-                                          filled: true,
-                                          fillColor: Colors.grey.shade50,
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            borderSide: BorderSide.none,
-                                          ),
-                                          enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            borderSide: BorderSide(
-                                              color: Colors.grey.shade300,
-                                            ),
-                                          ),
-                                          focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            borderSide: const BorderSide(
-                                              color: Color(0xFF667eea),
-                                              width: 2,
-                                            ),
-                                          ),
-                                          contentPadding:
-                                              const EdgeInsets.symmetric(
-                                                vertical: 16,
-                                                horizontal: 20,
-                                              ),
-                                        ),
-                                        keyboardType: TextInputType.number,
-                                        maxLength: 12,
-                                        onChanged: (value) => setState(() {}),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    ElevatedButton(
-                                      onPressed:
-                                          _lrnController.text.length == 12
-                                              ? _addStudent
-                                              : null,
-                                      style: ElevatedButton.styleFrom(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 20,
-                                          vertical: 16,
-                                        ),
-                                        backgroundColor: const Color(
-                                          0xFF4CAF50,
-                                        ),
-                                        foregroundColor: Colors.white,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            16,
-                                          ),
-                                        ),
-                                        elevation: 2,
-                                      ),
-                                      child: const Row(
-                                        children: [
-                                          Icon(
-                                            Icons.person_add_rounded,
-                                            size: 20,
-                                          ),
-                                          SizedBox(width: 8),
-                                          Text('Add'),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 24),
-                          // Students list
-                          Container(
-                            padding: const EdgeInsets.all(20),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.95),
-                              borderRadius: BorderRadius.circular(28),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.12),
-                                  blurRadius: 20,
-                                  offset: const Offset(0, 10),
-                                ),
-                              ],
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    const Text(
-                                      'Enrolled Students',
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.black87,
-                                      ),
-                                    ),
-                                    Text(
-                                      '${students.length} student${students.length != 1 ? 's' : ''}',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.grey.shade700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 16),
-                                if (isLoading)
-                                  const Center(
-                                    child: CircularProgressIndicator(
-                                      color: Color(0xFF667eea),
-                                    ),
-                                  )
-                                else if (errorMessage != null)
-                                  Center(
-                                    child: Column(
-                                      children: [
-                                        const Icon(
-                                          Icons.error_outline_rounded,
-                                          size: 64,
-                                          color: Colors.redAccent,
-                                        ),
-                                        const SizedBox(height: 16),
-                                        Text(
-                                          errorMessage!,
-                                          style: const TextStyle(
-                                            color: Colors.redAccent,
-                                          ),
-                                          textAlign: TextAlign.center,
-                                        ),
-                                        const SizedBox(height: 16),
-                                        OutlinedButton.icon(
-                                          onPressed: _loadStudents,
-                                          icon: const Icon(
-                                            Icons.refresh_rounded,
-                                          ),
-                                          label: const Text('Retry'),
-                                          style: OutlinedButton.styleFrom(
-                                            side: const BorderSide(
-                                              color: Color(0xFF667eea),
-                                            ),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(16),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                else if (students.isEmpty)
-                                  Center(
-                                    child: Column(
-                                      children: [
-                                        const Icon(
-                                          Icons.people_outline_rounded,
-                                          size: 64,
-                                          color: Colors.grey,
-                                        ),
-                                        const SizedBox(height: 16),
-                                        Text(
-                                          'No students enrolled yet',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            color: Colors.grey.shade700,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'Add students using their LRN above',
-                                          style: TextStyle(
-                                            color: Colors.grey.shade600,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                else
-                                  ListView.builder(
-                                    shrinkWrap: true,
-                                    physics:
-                                        const NeverScrollableScrollPhysics(),
-                                    itemCount: students.length,
-                                    itemBuilder: (context, index) {
-                                      final s = students[index];
-                                      final name =
-                                          s['full_name'] ??
-                                          '${s['firstname']} ${s['suffix'] ?? ''} ${s['surname']}'
-                                              .trim();
-                                      final initials =
-                                          '${s['firstname'][0]}${s['surname'][0]}'
-                                              .toUpperCase();
-                                      final sex = s['sex'] as String? ?? '';
-                                      return Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 12,
-                                        ),
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            color: Colors.grey.shade50,
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                          ),
-                                          child: ListTile(
-                                            leading: CircleAvatar(
-                                              backgroundColor: const Color(
-                                                0xFF667eea,
-                                              ).withOpacity(0.1),
-                                              child: Text(
-                                                initials,
-                                                style: const TextStyle(
-                                                  color: Color(0xFF667eea),
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                            ),
-                                            title: Text(
-                                              name,
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.black87,
-                                              ),
-                                            ),
-                                            subtitle: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  'LRN: ${s['lrn']}',
-                                                  style: TextStyle(
-                                                    color: Colors.grey.shade700,
-                                                  ),
-                                                ),
-                                                if (s['birthday'] != null)
-                                                  Text(
-                                                    'Birthday: ${s['birthday']}${sex.isNotEmpty ? ' · $sex' : ''}',
-                                                    style: TextStyle(
-                                                      fontSize: 12,
-                                                      color:
-                                                          Colors.grey.shade600,
-                                                    ),
-                                                  ),
-                                              ],
-                                            ),
-                                            trailing: const Icon(
-                                              Icons.chevron_right_rounded,
-                                              color: Colors.grey,
-                                            ),
-                                            onTap:
-                                                () => Navigator.push(
-                                                  context,
-                                                  MaterialPageRoute(
-                                                    builder:
-                                                        (context) =>
-                                                            StudentProfileScreen(
-                                                              lrn: s['lrn'],
-                                                              classId:
-                                                                  widget
-                                                                      .classId,
-                                                            ),
-                                                  ),
-                                                ),
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (ctx, i) =>
+                      _MobileStudentCard(student: _filtered[i], index: i),
+                  childCount: _filtered.length,
+                ),
+              ),
+            ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: _kAccent,
+        onPressed: () => openQRScanner(widget.classId, widget.className),
+        child: const Icon(Icons.qr_code_scanner, color: Colors.white),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Desktop student card (grid)
+// ─────────────────────────────────────────────────────────────────────────────
+class _DesktopStudentCard extends StatelessWidget {
+  final Map<String, dynamic> student;
+  const _DesktopStudentCard({required this.student});
+
+  @override
+  Widget build(BuildContext context) {
+    final fullName =
+        '${student['firstname'] ?? ''} ${student['suffix'] ?? ''} ${student['surname'] ?? ''}'
+            .trim()
+            .replaceAll(RegExp(r'  +'), ' ');
+    final lrn = student['lrn']?.toString() ?? '—';
+    final sex = student['sex'] as String?;
+    final lastStatus = student['last_status'] as String?;
+    final statusColor = switch (lastStatus) {
+      'Present' => Colors.green,
+      'Absent' => Colors.red,
+      'Late' => Colors.orange,
+      'Excused' => Colors.blue,
+      _ => Colors.grey,
+    };
+    final initial = fullName.isNotEmpty ? fullName[0].toUpperCase() : '?';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _kCard,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                // Avatar
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: const BoxDecoration(
+                    gradient: _kGrad,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      initial,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 17,
                       ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        fullName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          color: Color(0xFF1a1a2e),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'LRN: $lrn',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (lastStatus != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      lastStatus,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: statusColor,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const Spacer(),
+            Row(
+              children: [
+                if (sex != null) ...[
+                  Icon(
+                    sex == 'Male' ? Icons.male_rounded : Icons.female_rounded,
+                    size: 13,
+                    color:
+                        sex == 'Male'
+                            ? Colors.blue.shade400
+                            : Colors.pink.shade400,
+                  ),
+                  const SizedBox(width: 3),
+                  Text(
+                    sex,
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                const Spacer(),
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color:
+                        lastStatus != null ? statusColor : Colors.grey.shade300,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    TextInputType? keyboardType,
-  }) {
-    return TextField(
-      controller: controller,
-      keyboardType: keyboardType,
-      decoration: InputDecoration(
-        labelText: label,
-        filled: true,
-        fillColor: Colors.grey.shade50,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: Color(0xFF667eea), width: 2),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          vertical: 16,
-          horizontal: 16,
-        ),
-      ),
-    );
-  }
+// ─────────────────────────────────────────────────────────────────────────────
+// Mobile student card (list tile)
+// ─────────────────────────────────────────────────────────────────────────────
+class _MobileStudentCard extends StatelessWidget {
+  final Map<String, dynamic> student;
+  final int index;
+  const _MobileStudentCard({required this.student, required this.index});
 
   @override
-  void dispose() {
-    _lrnController.dispose();
-    _schoolIdController.dispose();
-    _schoolYearController.dispose();
-    _schoolNameController.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    final fullName =
+        '${student['firstname'] ?? ''} ${student['suffix'] ?? ''} ${student['surname'] ?? ''}'
+            .trim()
+            .replaceAll(RegExp(r'  +'), ' ');
+    final lrn = student['lrn']?.toString() ?? '—';
+    final sex = student['sex'] as String?;
+    final lastStatus = student['last_status'] as String?;
+    final statusColor = switch (lastStatus) {
+      'Present' => Colors.green,
+      'Absent' => Colors.red,
+      'Late' => Colors.orange,
+      'Excused' => Colors.blue,
+      _ => Colors.grey,
+    };
+    final initial = fullName.isNotEmpty ? fullName[0].toUpperCase() : '?';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: _kCard,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            // Rank badge
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Text(
+                  '${index + 1}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                    color: Colors.grey.shade500,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Avatar
+            Container(
+              width: 44,
+              height: 44,
+              decoration: const BoxDecoration(
+                gradient: _kGrad,
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  initial,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 19,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    fullName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: Color(0xFF1a1a2e),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Text(
+                        'LRN: $lrn',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade500,
+                        ),
+                      ),
+                      if (sex != null) ...[
+                        const SizedBox(width: 8),
+                        Icon(
+                          sex == 'Male'
+                              ? Icons.male_rounded
+                              : Icons.female_rounded,
+                          size: 14,
+                          color:
+                              sex == 'Male'
+                                  ? Colors.blue.shade400
+                                  : Colors.pink.shade400,
+                        ),
+                        Text(
+                          sex,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade500,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            // Status badge
+            if (lastStatus != null)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: statusColor.withOpacity(0.3)),
+                ),
+                child: Text(
+                  lastStatus,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: statusColor,
+                  ),
+                ),
+              )
+            else
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'No record',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rail stat widget (shared desktop)
+// ─────────────────────────────────────────────────────────────────────────────
+class _RailStat extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final bool loading;
+  final Color? valueColor;
+  const _RailStat({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.loading = false,
+    this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.12),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Row(
+      children: [
+        Icon(icon, color: valueColor ?? Colors.white70, size: 15),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white70, fontSize: 11),
+          ),
+        ),
+        loading
+            ? const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                color: Colors.white,
+                strokeWidth: 2,
+              ),
+            )
+            : Text(
+              value,
+              style: TextStyle(
+                color: valueColor ?? Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+      ],
+    ),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mobile stat badge
+// ─────────────────────────────────────────────────────────────────────────────
+class _MobileStatBadge extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color? color;
+  const _MobileStatBadge({required this.icon, required this.label, this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.2),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Colors.white.withOpacity(0.3)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color ?? Colors.white, size: 13),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(
+            color: color ?? Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 11,
+          ),
+        ),
+      ],
+    ),
+  );
 }
