@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:attsys/config/api_config.dart';
 import 'package:flutter/foundation.dart';
@@ -12,7 +11,12 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
-import 'dltype/file_download_mobile.dart';
+
+// ── Conditional import: web uses dart:html, others use file I/O ──────────────
+import 'dltype/file_download_stub.dart'
+    if (dart.library.html) 'dltype/file_download_web.dart'
+    if (dart.library.io) 'dltype/file_download_mobile.dart';
+
 import 'student_profile.dart';
 
 import 'dart:typed_data';
@@ -139,9 +143,8 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     }
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  /// Returns only weekday (Mon–Fri) days for the current month.
   List<int> _getSchoolDays({int? month, int? year}) {
     final now = DateTime.now();
     final m = month ?? now.month;
@@ -163,10 +166,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         .toList();
   }
 
-  /// Converts a status string to a single-character cell value for SF2.
-  /// Present / Late → '' (blank, meaning attended)
-  /// Absent         → 'A'
-  /// Excused        → 'E'
   String _statusToCell(String? status) {
     switch (status) {
       case 'Present':
@@ -182,8 +181,8 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     }
   }
 
-  // ── Fetch SF2 attendance from backend ──────────────────────────────────────
-  /// Returns a map of:  lrn → { dayNum(int) → status(String) }
+  // ── Fetch SF2 attendance ─────────────────────────────────────────────────────
+
   Future<Map<String, Map<int, String>>> _fetchSF2Attendance({
     int? month,
     int? year,
@@ -194,7 +193,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
       month: month,
       year: year,
     );
-
     final res = await http
         .get(Uri.parse(url), headers: ApiConfig.headers(token))
         .timeout(ApiConfig.timeout);
@@ -206,7 +204,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     final body = json.decode(res.body) as Map<String, dynamic>;
     final studentsList = body['students'] as List<dynamic>;
 
-    // Build lrn → { dayNum → status }
     final Map<String, Map<int, String>> result = {};
     for (final s in studentsList) {
       final lrn = s['lrn'] as String;
@@ -220,37 +217,44 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     return result;
   }
 
-  // ── Export to Excel ────────────────────────────────────────────────────────
-  Future<void> _exportToExcel() async {
+  // ── Validate export fields ───────────────────────────────────────────────────
+
+  bool _validateExportFields() {
+    final schoolId = _schoolIdController.text.trim();
+    final schoolYear = _schoolYearController.text.trim();
+    final schoolName = _schoolNameController.text.trim();
+
     if (students.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No students to export'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
+      _showSnackBar('No students to export', Colors.orange);
+      return false;
     }
+    if (schoolId.isEmpty || schoolYear.isEmpty || schoolName.isEmpty) {
+      _showSnackBar('Please fill in School ID, Year and Name', Colors.orange);
+      return false;
+    }
+    return true;
+  }
+
+  void _showSnackBar(String message, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message), backgroundColor: color));
+  }
+
+  // ── Export to Excel ──────────────────────────────────────────────────────────
+
+  Future<void> _exportToExcel() async {
+    if (!_validateExportFields()) return;
 
     final schoolId = _schoolIdController.text.trim();
     final schoolYear = _schoolYearController.text.trim();
     final schoolName = _schoolNameController.text.trim();
 
-    if (schoolId.isEmpty || schoolYear.isEmpty || schoolName.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in School ID, Year and Name'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
     setState(() => isExporting = true);
 
     try {
       final now = DateTime.now();
-      // Fetch real attendance data from backend
       final attendanceData = await _fetchSF2Attendance(
         month: now.month,
         year: now.year,
@@ -268,7 +272,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
       excel.rename('Sheet1', DateFormat('MMMM').format(now).toUpperCase());
       final sheet = excel[DateFormat('MMMM').format(now).toUpperCase()];
 
-      // ── Title rows ──────────────────────────────────────────────────────────
+      // Title rows
       sheet.merge(CellIndex.indexByString('A1'), CellIndex.indexByString('P1'));
       var titleCell = sheet.cell(CellIndex.indexByString('A1'));
       titleCell.value = TextCellValue(
@@ -290,7 +294,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         horizontalAlign: HorizontalAlign.Center,
       );
 
-      // ── School info rows ────────────────────────────────────────────────────
+      // School info rows
       sheet.merge(CellIndex.indexByString('A3'), CellIndex.indexByString('B3'));
       sheet.cell(CellIndex.indexByString('A3')).value = TextCellValue(
         'School ID',
@@ -331,9 +335,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         DateFormat('MMMM yyyy').format(now),
       );
 
-      // ── Column headers row 6 ────────────────────────────────────────────────
-      // No. | NAME | SEX | day1 | day2 | ... | dayN
-      // Col 0: No.   Col 1: (merged)   Col 2: Name   Col 3: Sex   Col 4+: Days
+      // Column headers
       final int dayColStart = 4;
 
       sheet.merge(CellIndex.indexByString('A6'), CellIndex.indexByString('B6'));
@@ -343,7 +345,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
 
       for (int i = 0; i < displayDays.length; i++) {
         final colIdx = dayColStart + i;
-        // Day number row
         final dayCell = sheet.cell(
           CellIndex.indexByColumnRow(columnIndex: colIdx, rowIndex: 5),
         );
@@ -352,7 +353,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
           bold: true,
           horizontalAlign: HorizontalAlign.Center,
         );
-        // Day-of-week row
         final dowCell = sheet.cell(
           CellIndex.indexByColumnRow(columnIndex: colIdx, rowIndex: 6),
         );
@@ -363,14 +363,12 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         );
       }
 
-      // ── Student rows ────────────────────────────────────────────────────────
+      // Student rows
       for (int i = 0; i < students.length; i++) {
         final student = students[i];
         final lrn = student['lrn'] as String;
-        final rowIndex =
-            i + 7; // rows 0-indexed; data starts at row 7 (row 8 in Excel)
+        final rowIndex = i + 7;
 
-        // Number
         sheet.merge(
           CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex),
           CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: rowIndex),
@@ -381,7 +379,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
             )
             .value = IntCellValue(i + 1);
 
-        // Name
         final name = '${student['surname'].toString().toUpperCase()}, '
                 '${student['firstname'].toString().toUpperCase()} '
                 '${student['middlename']?.toString().toUpperCase() ?? ''} '
@@ -394,7 +391,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
             )
             .value = TextCellValue(name);
 
-        // Sex
         final sexVal = student['sex'] as String? ?? '';
         sheet
             .cell(
@@ -402,7 +398,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
             )
             .value = TextCellValue(sexVal);
 
-        // Attendance cells — populate from fetched data
         final studentAttendance = attendanceData[lrn] ?? {};
         for (int j = 0; j < displayDays.length; j++) {
           final dayNum = displayDays[j];
@@ -419,7 +414,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         }
       }
 
-      // ── Footer ──────────────────────────────────────────────────────────────
+      // Footer
       final footerRow = students.length + 8;
       sheet.merge(
         CellIndex.indexByString('A$footerRow'),
@@ -429,22 +424,22 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         'Total School Days: ${displayDays.length}',
       );
 
-      // ── Column widths ───────────────────────────────────────────────────────
+      // Column widths
       sheet.setColumnWidth(0, 5);
       sheet.setColumnWidth(1, 5);
       sheet.setColumnWidth(2, 35);
-      sheet.setColumnWidth(3, 8); // SEX column
+      sheet.setColumnWidth(3, 8);
       for (int i = dayColStart; i < dayColStart + displayDays.length; i++) {
         sheet.setColumnWidth(i, 6);
       }
 
-      // ── Legend ──────────────────────────────────────────────────────────────
+      // Legend
       final legendRow = students.length + 10;
       sheet.cell(CellIndex.indexByString('A$legendRow')).value = TextCellValue(
         'Legend: blank = Present, L = Late, A = Absent, E = Excused',
       );
 
-      // ── Save ────────────────────────────────────────────────────────────────
+      // Save bytes
       final fileBytes = excel.save();
       if (fileBytes == null || fileBytes.isEmpty) {
         throw Exception('Excel save returned null or empty bytes');
@@ -452,37 +447,29 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
 
       final fileName =
           'SF2_${widget.className}_${DateFormat('yyyy-MM').format(now)}.xlsx';
-      if (kIsWeb || Platform.isWindows) {
-        await downloadFile(
-          Uint8List.fromList(fileBytes),
-          fileName,
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        );
-      }
 
+      // ── Download ────────────────────────────────────────────────────────────
+      // downloadFile handles the platform difference (web vs mobile/desktop).
+      // On web: triggers browser download. On mobile/desktop: saves & opens file.
+      await downloadFile(
+        Uint8List.fromList(fileBytes),
+        fileName,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+
+      // Only show success after download completes without error
       if (mounted) {
         setState(() => isExporting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Excel downloaded: $fileName'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        _showSnackBar('Excel downloaded: $fileName', Colors.green);
       }
     } catch (e) {
       if (mounted) {
         setState(() => isExporting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Export failed: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showSnackBar('Export failed: $e', Colors.red);
       }
     }
   }
 
-  /// Helper: set header cell style
   void _headerCell(Sheet sheet, String address, String text) {
     final cell = sheet.cell(CellIndex.indexByString(address));
     cell.value = TextCellValue(text);
@@ -492,37 +479,19 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     );
   }
 
-  // ── Export to PDF ──────────────────────────────────────────────────────────
+  // ── Export to PDF ────────────────────────────────────────────────────────────
+
   Future<void> _exportToPDF() async {
-    if (students.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No students to export'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
+    if (!_validateExportFields()) return;
 
     final schoolId = _schoolIdController.text.trim();
     final schoolYear = _schoolYearController.text.trim();
     final schoolName = _schoolNameController.text.trim();
 
-    if (schoolId.isEmpty || schoolYear.isEmpty || schoolName.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in School ID, Year and Name'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
     setState(() => isExporting = true);
 
     try {
       final now = DateTime.now();
-      // Fetch real attendance data from backend
       final attendanceData = await _fetchSF2Attendance(
         month: now.month,
         year: now.year,
@@ -547,7 +516,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                // Title
                 pw.Center(
                   child: pw.Text(
                     'School Form 2 (SF2) Daily Attendance Report of Learners',
@@ -565,8 +533,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                   ),
                 ),
                 pw.SizedBox(height: 8),
-
-                // School info
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
@@ -596,14 +562,12 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                   ),
                 ),
                 pw.SizedBox(height: 8),
-
-                // Table
                 pw.Table(
                   border: pw.TableBorder.all(width: 0.5),
                   columnWidths: {
-                    0: const pw.FixedColumnWidth(25), // No.
-                    1: const pw.FixedColumnWidth(175), // Name
-                    2: const pw.FixedColumnWidth(25), // Sex
+                    0: const pw.FixedColumnWidth(25),
+                    1: const pw.FixedColumnWidth(175),
+                    2: const pw.FixedColumnWidth(25),
                     ...{
                       for (int i = 0; i < numDayColumns; i++)
                         i + 3: const pw.FixedColumnWidth(20),
@@ -625,7 +589,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                         ),
                       ],
                     ),
-
                     // Header row 2: day-of-week
                     pw.TableRow(
                       decoration: const pw.BoxDecoration(
@@ -649,7 +612,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                         ),
                       ],
                     ),
-
                     // Student rows
                     ...students.asMap().entries.map((entry) {
                       final index = entry.key;
@@ -717,7 +679,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                     }),
                   ],
                 ),
-
                 pw.SizedBox(height: 8),
                 pw.Text(
                   'Total School Days: $numDayColumns   |   Legend: blank = Present, L = Late, A = Absent, E = Excused',
@@ -733,26 +694,19 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
       final fileName =
           'SF2_${widget.className}_${DateFormat('yyyy-MM').format(now)}.pdf';
 
+      // ── Download ────────────────────────────────────────────────────────────
+      // downloadFile handles web (dart:html blob download) and mobile/desktop.
       await downloadFile(pdfBytes, fileName, 'application/pdf');
 
+      // Only show success after download completes without error
       if (mounted) {
         setState(() => isExporting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('PDF downloaded: $fileName'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        _showSnackBar('PDF downloaded: $fileName', Colors.green);
       }
     } catch (e) {
       if (mounted) {
         setState(() => isExporting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Export failed: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showSnackBar('Export failed: $e', Colors.red);
       }
     }
   }
@@ -769,10 +723,8 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     );
   }
 
-  // ── CSV / XLSX Import ───────────────────────────────────────────────────────
+  // ── CSV / XLSX Import ────────────────────────────────────────────────────────
 
-  /// Parses a raw string as CSV, returning a list of rows (each row = list of cells).
-  /// Handles quoted fields and comma delimiters.
   List<List<String>> _parseCsv(String content) {
     final rows = <List<String>>[];
     for (final line in content.split(RegExp(r'\r?\n'))) {
@@ -802,11 +754,9 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     return rows;
   }
 
-  /// Finds the column index for [header] in [headers] list (case-insensitive).
   int _colIndex(List<String> headers, String header) =>
       headers.indexWhere((h) => h.toLowerCase() == header.toLowerCase());
 
-  /// Downloads a blank CSV template the teacher can fill in.
   Future<void> _downloadImportTemplate() async {
     const content =
         'lrn,firstname,surname,suffix,middlename,birthday,sex\n'
@@ -820,9 +770,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     );
   }
 
-  /// Picks a CSV or XLSX file, parses it, and bulk-enrolls students.
   Future<void> _importStudents() async {
-    // Pick file
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['csv', 'xlsx', 'xls'],
@@ -837,7 +785,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
 
     final ext = (file.extension ?? '').toLowerCase();
 
-    // Parse rows → [ { lrn, firstname, surname, suffix, middlename, birthday, sex } ]
     List<Map<String, String>> rows = [];
     try {
       if (ext == 'csv') {
@@ -847,29 +794,18 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to parse file: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+        _showSnackBar('Failed to parse file: $e', Colors.redAccent);
       }
       return;
     }
 
     if (rows.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No valid rows found in file'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+        _showSnackBar('No valid rows found in file', Colors.orange);
       }
       return;
     }
 
-    // Confirm before importing
     final confirmed = await showDialog<bool>(
       context: context,
       builder:
@@ -907,8 +843,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
 
     setState(() => isImporting = true);
 
-    int success = 0;
-    int skipped = 0;
+    int success = 0, skipped = 0;
     final List<String> errors = [];
 
     for (final row in rows) {
@@ -933,7 +868,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         if (res.statusCode == 201) {
           success++;
         } else if (res.statusCode == 409) {
-          skipped++; // already enrolled
+          skipped++;
         } else {
           final msg = json.decode(res.body)['message'] ?? 'Error';
           errors.add('LRN $lrn: $msg');
@@ -948,7 +883,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
 
     if (!mounted) return;
 
-    // Result summary dialog
     showDialog(
       context: context,
       builder:
@@ -1030,13 +964,11 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     );
   }
 
-  /// Parses CSV bytes into a list of row maps.
   List<Map<String, String>> _parseCsvBytes(Uint8List bytes) {
     final content = utf8.decode(bytes, allowMalformed: true);
     final allRows = _parseCsv(content);
     if (allRows.isEmpty) return [];
 
-    // First row = headers
     final headers = allRows.first.map((h) => h.trim()).toList();
     final lrnIdx = _colIndex(headers, 'lrn');
     final firstIdx = _colIndex(headers, 'firstname');
@@ -1062,10 +994,8 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     }).toList();
   }
 
-  /// Parses XLSX bytes into a list of row maps.
   List<Map<String, String>> _parseXlsxBytes(Uint8List bytes) {
     final excel = Excel.decodeBytes(bytes);
-    // Use the first sheet that has data
     Sheet? sheet;
     for (final name in excel.tables.keys) {
       final s = excel.tables[name];
@@ -1079,12 +1009,10 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     final rows = sheet.rows;
     if (rows.isEmpty) return [];
 
-    // First row = headers
     final headers =
         rows.first
             .map((c) => (c?.value?.toString() ?? '').trim().toLowerCase())
             .toList();
-
     final lrnIdx = headers.indexOf('lrn');
     final firstIdx = headers.indexOf('firstname');
     final surnameIdx = headers.indexOf('surname');
@@ -1098,7 +1026,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
       if (idx < 0 || idx >= row.length) return '';
       final v = row[idx]?.value;
       if (v == null) return '';
-      // Excel may store dates as doubles
       if (v is DateTime) return DateFormat('yyyy-MM-dd').format(v as DateTime);
       return v.toString().trim();
     }
@@ -1120,7 +1047,8 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         .toList();
   }
 
-  // ── Export options sheet ───────────────────────────────────────────────────
+  // ── Export options sheet ─────────────────────────────────────────────────────
+
   void _showExportOptions() {
     showModalBottomSheet(
       context: context,
@@ -1211,14 +1139,14 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
     );
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
+  // ── Build ────────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         actions: [
-          // Import button — always visible so teacher can import even before students are added
           IconButton(
             icon:
                 isImporting
@@ -1263,7 +1191,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              // Header
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 16, 12),
                 child: Row(
@@ -1300,7 +1227,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                   ],
                 ),
               ),
-
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: _loadStudents,
@@ -1339,126 +1265,32 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-
                                 Row(
                                   children: [
                                     Expanded(
-                                      child: TextField(
+                                      child: _buildTextField(
                                         controller: _schoolIdController,
-                                        decoration: InputDecoration(
-                                          labelText: 'School ID',
-                                          filled: true,
-                                          fillColor: Colors.grey.shade50,
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                            borderSide: BorderSide.none,
-                                          ),
-                                          enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            borderSide: BorderSide(
-                                              color: Colors.grey.shade300,
-                                            ),
-                                          ),
-                                          focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            borderSide: const BorderSide(
-                                              color: Color(0xFF667eea),
-                                              width: 2,
-                                            ),
-                                          ),
-                                          contentPadding:
-                                              const EdgeInsets.symmetric(
-                                                vertical: 16,
-                                                horizontal: 16,
-                                              ),
-                                        ),
+                                        label: 'School ID',
                                         keyboardType: TextInputType.number,
                                       ),
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(
-                                      child: TextField(
+                                      child: _buildTextField(
                                         controller: _schoolYearController,
-                                        decoration: InputDecoration(
-                                          labelText: 'School Year',
-
-                                          filled: true,
-                                          fillColor: Colors.grey.shade50,
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                            borderSide: BorderSide.none,
-                                          ),
-                                          enabledBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            borderSide: BorderSide(
-                                              color: Colors.grey.shade300,
-                                            ),
-                                          ),
-                                          focusedBorder: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            borderSide: const BorderSide(
-                                              color: Color(0xFF667eea),
-                                              width: 2,
-                                            ),
-                                          ),
-                                          contentPadding:
-                                              const EdgeInsets.symmetric(
-                                                vertical: 16,
-                                                horizontal: 16,
-                                              ),
-                                        ),
+                                        label: 'School Year',
                                       ),
                                     ),
                                   ],
                                 ),
                                 const SizedBox(height: 12),
-
-                                TextField(
+                                _buildTextField(
                                   controller: _schoolNameController,
-                                  decoration: InputDecoration(
-                                    labelText: 'School Name',
-                                    filled: true,
-                                    fillColor: Colors.grey.shade50,
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      borderSide: BorderSide(
-                                        color: Colors.grey.shade300,
-                                      ),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      borderSide: const BorderSide(
-                                        color: Color(0xFF667eea),
-                                        width: 2,
-                                      ),
-                                    ),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      vertical: 16,
-                                      horizontal: 16,
-                                    ),
-                                  ),
+                                  label: 'School Name',
                                 ),
-
                                 const SizedBox(height: 24),
                                 const Divider(),
                                 const SizedBox(height: 16),
-
                                 const Text(
                                   'Add Student',
                                   style: TextStyle(
@@ -1468,7 +1300,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-
                                 Row(
                                   children: [
                                     Expanded(
@@ -1566,9 +1397,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                               ],
                             ),
                           ),
-
                           const SizedBox(height: 24),
-
                           // Students list
                           Container(
                             padding: const EdgeInsets.all(20),
@@ -1608,7 +1437,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                   ],
                                 ),
                                 const SizedBox(height: 16),
-
                                 if (isLoading)
                                   const Center(
                                     child: CircularProgressIndicator(
@@ -1695,7 +1523,6 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                           '${s['firstname'][0]}${s['surname'][0]}'
                                               .toUpperCase();
                                       final sex = s['sex'] as String? ?? '';
-
                                       return Padding(
                                         padding: const EdgeInsets.only(
                                           bottom: 12,
@@ -1739,8 +1566,7 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                                 ),
                                                 if (s['birthday'] != null)
                                                   Text(
-                                                    'Birthday: ${s['birthday']}'
-                                                    '${sex.isNotEmpty ? ' · $sex' : ''}',
+                                                    'Birthday: ${s['birthday']}${sex.isNotEmpty ? ' · $sex' : ''}',
                                                     style: TextStyle(
                                                       fontSize: 12,
                                                       color:
@@ -1753,20 +1579,20 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
                                               Icons.chevron_right_rounded,
                                               color: Colors.grey,
                                             ),
-                                            onTap: () {
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder:
-                                                      (context) =>
-                                                          StudentProfileScreen(
-                                                            lrn: s['lrn'],
-                                                            classId:
-                                                                widget.classId,
-                                                          ),
+                                            onTap:
+                                                () => Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder:
+                                                        (context) =>
+                                                            StudentProfileScreen(
+                                                              lrn: s['lrn'],
+                                                              classId:
+                                                                  widget
+                                                                      .classId,
+                                                            ),
+                                                  ),
                                                 ),
-                                              );
-                                            },
                                           ),
                                         ),
                                       );
@@ -1783,6 +1609,38 @@ class _ClassStudentsScreenState extends State<ClassStudentsScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    TextInputType? keyboardType,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      decoration: InputDecoration(
+        labelText: label,
+        filled: true,
+        fillColor: Colors.grey.shade50,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Color(0xFF667eea), width: 2),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 16,
+          horizontal: 16,
         ),
       ),
     );

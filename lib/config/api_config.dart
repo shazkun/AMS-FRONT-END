@@ -7,11 +7,11 @@ class ApiConfig {
 
   static String get baseUrl => isDevelopment ? _devUrl : _prodUrl;
 
-  // Auth
+  // ── Auth ──────────────────────────────────────────────────────────────
   static String get authLogin => '$baseUrl/api/auth/login';
   static String get authRegister => '$baseUrl/api/auth/register';
 
-  // Teacher
+  // ── Teacher ───────────────────────────────────────────────────────────
   static String get teacherClasses => '$baseUrl/api/teacher/classes';
   static String get teacherRecordScan => '$baseUrl/api/teacher/record-scan';
   static String teacherStudents(String lrn) =>
@@ -28,29 +28,67 @@ class ApiConfig {
     return '$baseUrl/api/teacher/classes/$classId/sf2-attendance?month=$m&year=$y';
   }
 
-  // Student
+  // ── Student ───────────────────────────────────────────────────────────
   static String get studentProfile => '$baseUrl/api/student/profile';
   static String get studentClasses => '$baseUrl/api/student/classes';
   static String get studentAttendance => '$baseUrl/api/student/attendance';
 
-  // Admin
+  // ── Admin — READ ──────────────────────────────────────────────────────
   static String get adminTeachers => '$baseUrl/api/admin/teachers';
   static String get adminStudents => '$baseUrl/api/admin/students';
   static String get adminClasses => '$baseUrl/api/admin/classes';
+
+  // ── Admin — Teacher CRUD ──────────────────────────────────────────────
+  /// POST   → create teacher
+  /// (use adminTeachers for POST)
+
+  /// PUT /api/admin/teachers/:id
+  static String adminUpdateTeacher(String teacherId) =>
+      '$baseUrl/api/admin/teachers/$teacherId';
+
+  /// DELETE /api/admin/teachers/:id
+  static String adminDeleteTeacher(String teacherId) =>
+      '$baseUrl/api/admin/teachers/$teacherId';
+
+  /// GET  /api/admin/teachers/:id/classes
   static String adminTeacherClasses(String teacherId) =>
       '$baseUrl/api/admin/teachers/$teacherId/classes';
+
+  /// POST /api/admin/teachers/:id/classes  → create class for teacher
+  // (same URL as adminTeacherClasses, different method)
+
+  // ── Admin — Student CRUD ──────────────────────────────────────────────
+  /// PUT /api/admin/students/:lrn
+  static String adminUpdateStudent(String lrn) =>
+      '$baseUrl/api/admin/students/$lrn';
+
+  /// DELETE /api/admin/students/:lrn
+  static String adminDeleteStudent(String lrn) =>
+      '$baseUrl/api/admin/students/$lrn';
+
+  // ── Admin — Class CRUD ────────────────────────────────────────────────
+  /// PUT /api/admin/classes/:id
+  static String adminUpdateClass(String classId) =>
+      '$baseUrl/api/admin/classes/$classId';
+
+  /// DELETE /api/admin/classes/:id
   static String adminDeleteClass(String classId) =>
       '$baseUrl/api/admin/classes/$classId';
 
-  // Timeout
+  /// GET /api/admin/classes/:classId/students
+  static String adminClassStudents(String classId) =>
+      '$baseUrl/api/admin/classes/$classId/students';
+
+  /// DELETE /api/admin/classes/:classId/students/:lrn
+  static String adminRemoveStudentFromClass(String classId, String lrn) =>
+      '$baseUrl/api/admin/classes/$classId/students/$lrn';
+
+  // ── Timeout & Headers ─────────────────────────────────────────────────
   static const Duration timeout = Duration(seconds: 30);
 
-  // Headers helper
   static Map<String, String> headers(String? token) {
-    final Map<String, String> headers = {'Content-Type': 'application/json'};
-    if (token != null) {
-      headers['Authorization'] = 'Bearer $token';
-    }
-    return headers;
+    final Map<String, String> h = {'Content-Type': 'application/json'};
+    if (token != null) h['Authorization'] = 'Bearer $token';
+    return h;
   }
 }
